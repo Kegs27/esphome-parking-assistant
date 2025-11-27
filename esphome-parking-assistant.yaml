@@ -241,6 +241,11 @@ interval:
           // Update zone status text sensor
           id(parking_zone_status).publish_state(zone_name);
           
+          // Reset beep_active when RTTTL has finished playing so the beep can restart
+          if (id(beep_active) && !id(buzzer_rtttl).is_playing()) {
+            id(beep_active) = false;
+          }
+          
           // Als zone veranderd is of geen beep actief is, start nieuwe beep
           if (current_zone != id(last_distance_zone) || !id(beep_active)) {
             id(last_distance_zone) = current_zone;
