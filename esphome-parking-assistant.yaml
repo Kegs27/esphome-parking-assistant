@@ -200,6 +200,28 @@ text_sensor:
     icon: "mdi:traffic-light"
     entity_category: diagnostic
 
+# Configurable RTTTL beep patterns
+text:
+  - platform: template
+    name: "Beep Pattern (Zones 1-3)"
+    id: beep_pattern
+    optimistic: true
+    restore_value: true
+    initial_value: "beep:d=4,o=6,b=100:e"
+    mode: text
+    icon: "mdi:music-note"
+    entity_category: config
+    
+  - platform: template
+    name: "Alarm Pattern (Zone 4 - STOP)"
+    id: alarm_pattern
+    optimistic: true
+    restore_value: true
+    initial_value: "alarm:d=4,o=6,b=100:2e,2e,2e,2e"
+    mode: text
+    icon: "mdi:alarm"
+    entity_category: config
+
 # Buzzer output op GPIO27 - LEDC voor RTTTL
 output:
   - platform: ledc
@@ -319,8 +341,8 @@ interval:
           if (current_zone == 4) {
             // Play continuous alarm if not already playing
             if (!id(buzzer_rtttl).is_playing()) {
-              // Long continuous alarm tone for STOP zone
-              id(buzzer_rtttl).play("alarm:d=4,o=6,b=100:2e,2e,2e,2e");
+              // Use configurable alarm pattern for STOP zone
+              id(buzzer_rtttl).play(id(alarm_pattern).state);
               id(beep_active) = true;
             }
             return;
@@ -342,7 +364,7 @@ interval:
           
           if (should_beep && !id(buzzer_rtttl).is_playing()) {
             id(last_beep_time) = now;
-            // Play a loud beep tone (RTTTL format: d=4 quarter note, o=6 octave 6, b=100 tempo)
-            id(buzzer_rtttl).play("beep:d=4,o=6,b=100:e");
+            // Use configurable beep pattern for zones 1-3
+            id(buzzer_rtttl).play(id(beep_pattern).state);
             id(beep_active) = true;
           }
