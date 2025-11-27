@@ -153,6 +153,7 @@ number:
   - platform: template
     name: "Zone 4 - Beep Interval"
     id: zone4_interval
+    # Zone 4 (STOP zone) allows faster beeping (50ms min) for urgent feedback
     min_value: 50
     max_value: 3000
     step: 50
@@ -239,7 +240,8 @@ globals:
     initial_value: '0'
 
 interval:
-  - interval: 50ms
+  # 100ms interval for responsive beeping while minimizing CPU usage
+  - interval: 100ms
     then:
       - lambda: |-
           // Check of systeem actief moet zijn
@@ -341,7 +343,8 @@ interval:
           if (should_beep && !id(buzzer_rtttl).is_playing()) {
             id(last_beep_time) = now;
             // Play a loud, consistent beep tone for all zones (same volume and pitch)
-            // Short, loud beep - using high octave for audibility
+            // RTTTL format: d=16 (sixteenth note), o=7 (high octave for audibility), b=900 (fast tempo)
+            // The 16e plays a short E note - adjust octave (o) for pitch, b for duration
             id(buzzer_rtttl).play("beep:d=16,o=7,b=900:16e");
             id(beep_active) = true;
           }
