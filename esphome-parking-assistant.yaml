@@ -113,17 +113,19 @@ binary_sensor:
     entity_id: binary_sensor.garage_poort_sensor_open
     id: garagepoort
 
-# SR04T in Mode 0 (standaard, geen modificatie nodig)
-# Bereik: 25cm - 4m
+# JSN-SR04T in Mode 1 (100k resistor op R19 pad)
+# In Mode 1: Serial output mode via UART
+# Bereik: 25cm - 4m (verbeterde stabiliteit en nauwkeurigheid)
+uart:
+  tx_pin: GPIO32  # Trigger pin (TX van ESP32 naar RX van sensor)
+  rx_pin: GPIO33  # Echo pin (RX van ESP32 van TX van sensor)
+  baud_rate: 9600
+
 sensor:
-  - platform: ultrasonic
-    trigger_pin: GPIO32
-    echo_pin: GPIO33
+  - platform: jsn_sr04t
     name: "Garage afstand"
     id: afstand
     update_interval: 0.25s
-    pulse_time: 10us
-    timeout: 4m  # 4 meter max afstand
     filters:
       - filter_out: nan
       - clamp:
