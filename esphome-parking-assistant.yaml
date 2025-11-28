@@ -24,6 +24,34 @@ api:
         - rtttl.play:
             rtttl: !lambda 'return song_str;'
 
+    # Service om LED strip effecten te testen
+    - service: test_led_effect
+      variables:
+        effect_name: string
+      then:
+        - light.turn_on:
+            id: led_strip
+            effect: !lambda 'return effect_name;'
+
+    # Service om specifieke zone animatie te testen
+    - service: test_zone_leds
+      variables:
+        zone_number: int
+      then:
+        - lambda: |-
+            std::string effect_name;
+            switch(zone_number) {
+              case 0: effect_name = "Zone 0 - Veilig"; break;
+              case 1: effect_name = "Zone 1 - Langzaam"; break;
+              case 2: effect_name = "Zone 2 - Medium"; break;
+              case 3: effect_name = "Zone 3 - Voorzichtig"; break;
+              case 4: effect_name = "Zone 4 - STOP"; break;
+              default: effect_name = "Test - Rainbow"; break;
+            }
+            auto call = id(led_strip).turn_on();
+            call.set_effect(effect_name);
+            call.perform();
+
 # Allow Over-The-Air updates
 ota:
   - platform: esphome
@@ -31,6 +59,131 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+
+# WS2812B LED strip (20 LEDs op GPIO26 met 330Ω resistor)
+light:
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB
+    pin: GPIO26
+    num_leds: 20
+    chipset: ws2812
+    name: "Parking LED Strip"
+    id: led_strip
+    restore_mode: ALWAYS_OFF
+    default_transition_length: 0s
+    effects:
+      # Zone 0 - Veilig (geen geluid) - groen statisch
+      - addressable_lambda:
+          name: "Zone 0 - Veilig"
+          update_interval: 50ms
+          lambda: |-
+            // Groen statisch - alles veilig
+            it.all() = Color(0, 255, 0);
+
+      # Zone 1 - Langzaam - groene breathing
+      - addressable_lambda:
+          name: "Zone 1 - Langzaam"
+          update_interval: 50ms
+          lambda: |-
+            static uint8_t brightness = 0;
+            static int8_t direction = 1;
+            
+            brightness += direction * 5;
+            if (brightness >= 255 || brightness <= 50) {
+              direction *= -1;
+            }
+            
+            it.all() = Color(0, brightness, 0);
+
+      # Zone 2 - Medium - gele fill animatie
+      - addressable_lambda:
+          name: "Zone 2 - Medium"
+          update_interval: 100ms
+          lambda: |-
+            static int pos = 0;
+            static int direction = 1;
+            
+            it.all() = Color(0, 0, 0);
+            
+            for (int i = 0; i < pos && i < it.size(); i++) {
+              it[i] = Color(255, 200, 0);  // Geel/oranje
+            }
+            
+            pos += direction;
+            if (pos >= it.size() || pos <= 0) {
+              direction *= -1;
+            }
+
+      # Zone 3 - Voorzichtig - oranje snel knipperen
+      - addressable_lambda:
+          name: "Zone 3 - Voorzichtig"
+          update_interval: 150ms
+          lambda: |-
+            static bool on = false;
+            on = !on;
+            
+            if (on) {
+              it.all() = Color(255, 100, 0);  // Oranje
+            } else {
+              it.all() = Color(0, 0, 0);
+            }
+
+      # Zone 4 - STOP - rood knipperen + chase
+      - addressable_lambda:
+          name: "Zone 4 - STOP"
+          update_interval: 75ms
+          lambda: |-
+            static int pos = 0;
+            static bool flash = false;
+            
+            flash = !flash;
+            
+            if (flash) {
+              it.all() = Color(255, 0, 0);  // Helemaal rood
+            } else {
+              // Rood chase effect
+              it.all() = Color(50, 0, 0);  // Dim rood
+              for (int i = 0; i < 3; i++) {
+                int idx = (pos + i) % it.size();
+                it[idx] = Color(255, 0, 0);  // Fel rood
+              }
+              pos = (pos + 1) % it.size();
+            }
+
+      # Test effect - rainbow
+      - addressable_rainbow:
+          name: "Test - Rainbow"
+          speed: 10
+          width: 20
+
+      # Test effect - scanner (Knight Rider style)
+      - addressable_scan:
+          name: "Test - Scanner"
+          move_interval: 50ms
+
+      # Test effect - alle LEDs testen
+      - addressable_lambda:
+          name: "Test - LED Check"
+          update_interval: 500ms
+          lambda: |-
+            static int led_index = 0;
+            static int color_index = 0;
+            
+            Color colors[] = {
+              Color(255, 0, 0),    // Rood
+              Color(0, 255, 0),    // Groen
+              Color(0, 0, 255),    // Blauw
+              Color(255, 255, 255) // Wit
+            };
+            
+            it.all() = Color(0, 0, 0);
+            it[led_index] = colors[color_index];
+            
+            led_index++;
+            if (led_index >= it.size()) {
+              led_index = 0;
+              color_index = (color_index + 1) % 4;
+            }
 
 # Helper switches
 switch:
@@ -48,6 +201,17 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     icon: "mdi:test-tube"
     entity_category: config
+
+  - platform: template
+    name: "LED Strip Enabled"
+    id: led_strip_enabled
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    icon: "mdi:led-strip-variant"
+    on_turn_on:
+      - light.turn_on: led_strip
+    on_turn_off:
+      - light.turn_off: led_strip
 
 # Configureerbare afstandszones (aanpasbaar vanuit Home Assistant)
 number:
@@ -260,6 +424,11 @@ interval:
             if (id(buzzer_rtttl).is_playing()) {
               id(buzzer_rtttl).stop();
             }
+            // LED strip uitschakelen als systeem niet actief is
+            if (id(led_strip_enabled).state && id(led_strip).current_values.is_on()) {
+              auto call = id(led_strip).turn_off();
+              call.perform();
+            }
             id(last_distance_zone) = 0;
             id(beep_active) = false;
             id(last_beep_time) = 0;
@@ -277,6 +446,11 @@ interval:
           if (d <= 0 || isnan(d)) {
             if (id(buzzer_rtttl).is_playing()) {
               id(buzzer_rtttl).stop();
+            }
+            // LED strip uitschakelen bij ongeldige meting
+            if (id(led_strip_enabled).state && id(led_strip).current_values.is_on()) {
+              auto call = id(led_strip).turn_off();
+              call.perform();
             }
             id(last_distance_zone) = 0;
             id(beep_active) = false;
@@ -320,6 +494,22 @@ interval:
           
           // Update zone status text sensor
           id(parking_zone_status).publish_state(zone_name);
+          
+          // Update LED strip als zone is veranderd en LED strip is enabled
+          if (id(led_strip_enabled).state && id(last_distance_zone) != current_zone) {
+            std::string led_effect;
+            switch(current_zone) {
+              case 0: led_effect = "Zone 0 - Veilig"; break;
+              case 1: led_effect = "Zone 1 - Langzaam"; break;
+              case 2: led_effect = "Zone 2 - Medium"; break;
+              case 3: led_effect = "Zone 3 - Voorzichtig"; break;
+              case 4: led_effect = "Zone 4 - STOP"; break;
+              default: led_effect = "Zone 0 - Veilig"; break;
+            }
+            auto call = id(led_strip).turn_on();
+            call.set_effect(led_effect);
+            call.perform();
+          }
           
           // Update last_distance_zone
           id(last_distance_zone) = current_zone;
