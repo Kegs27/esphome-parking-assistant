@@ -33,24 +33,12 @@ api:
             id: led_strip
             effect: !lambda 'return effect_name;'
 
-    # Service om specifieke zone animatie te testen
-    - service: test_zone_leds
-      variables:
-        zone_number: int
+    # Service om de progressie balk te testen met een simulatie afstand
+    - service: test_progress_bar
       then:
-        - lambda: |-
-            std::string effect_name;
-            switch(zone_number) {
-              case 0: effect_name = "Zone 0 - Veilig"; break;
-              case 1: effect_name = "Zone 1 - Langzaam"; break;
-              case 2: effect_name = "Zone 2 - Medium"; break;
-              case 3: effect_name = "Zone 3 - Voorzichtig"; break;
-              case 4: effect_name = "Zone 4 - STOP"; break;
-              default: effect_name = "Test - Rainbow"; break;
-            }
-            auto call = id(led_strip).turn_on();
-            call.set_effect(effect_name);
-            call.perform();
+        - light.turn_on:
+            id: led_strip
+            effect: "Distance Progress Bar"
 
 # Allow Over-The-Air updates
 ota:
@@ -72,82 +60,73 @@ light:
     restore_mode: ALWAYS_OFF
     default_transition_length: 0s
     effects:
-      # Zone 0 - Veilig (geen geluid) - groen statisch
+      # Progressieve laadbalksysteem - opbouwend van groen naar rood
       - addressable_lambda:
-          name: "Zone 0 - Veilig"
+          name: "Distance Progress Bar"
           update_interval: 50ms
           lambda: |-
-            // Groen statisch - alles veilig
-            it.all() = Color(0, 255, 0);
-
-      # Zone 1 - Langzaam - groene breathing
-      - addressable_lambda:
-          name: "Zone 1 - Langzaam"
-          update_interval: 50ms
-          lambda: |-
-            static uint8_t brightness = 0;
-            static int8_t direction = 1;
+            // Haal huidige afstand op
+            float distance = id(afstand).state;
+            float max_distance = id(zone1_min).state;  // Maximum afstand (1.2m standaard)
+            float min_distance = id(zone4_min).state;  // Minimum afstand (0.25m standaard)
             
-            brightness += direction * 5;
-            if (brightness >= 255 || brightness <= 50) {
-              direction *= -1;
+            // Bereken hoeveel LEDs aan moeten (0-20)
+            int num_leds = 0;
+            if (distance <= min_distance) {
+              num_leds = 20;  // Alle LEDs aan bij minimum afstand
+            } else if (distance >= max_distance) {
+              num_leds = 0;   // Geen LEDs bij veilige afstand
+            } else {
+              // Lineair schalen tussen min en max
+              float progress = 1.0 - ((distance - min_distance) / (max_distance - min_distance));
+              num_leds = (int)(progress * 20.0);
+              num_leds = std::max(0, std::min(20, num_leds));  // Clamp tussen 0-20
             }
             
-            it.all() = Color(0, brightness, 0);
-
-      # Zone 2 - Medium - gele fill animatie
-      - addressable_lambda:
-          name: "Zone 2 - Medium"
-          update_interval: 100ms
-          lambda: |-
-            static int pos = 0;
-            static int direction = 1;
+            // Als we heel dichtbij zijn (laatste 5 LEDs), laat knipperen
+            static bool blink_state = false;
+            static int blink_counter = 0;
+            blink_counter++;
+            if (blink_counter > 6) {  // Elke ~300ms (6 * 50ms)
+              blink_state = !blink_state;
+              blink_counter = 0;
+            }
             
+            bool should_blink = num_leds > 15 && !blink_state;
+            
+            // Alle LEDs uit
             it.all() = Color(0, 0, 0);
             
-            for (int i = 0; i < pos && i < it.size(); i++) {
-              it[i] = Color(255, 200, 0);  // Geel/oranje
-            }
-            
-            pos += direction;
-            if (pos >= it.size() || pos <= 0) {
-              direction *= -1;
-            }
-
-      # Zone 3 - Voorzichtig - oranje snel knipperen
-      - addressable_lambda:
-          name: "Zone 3 - Voorzichtig"
-          update_interval: 150ms
-          lambda: |-
-            static bool on = false;
-            on = !on;
-            
-            if (on) {
-              it.all() = Color(255, 100, 0);  // Oranje
-            } else {
-              it.all() = Color(0, 0, 0);
-            }
-
-      # Zone 4 - STOP - rood knipperen + chase
-      - addressable_lambda:
-          name: "Zone 4 - STOP"
-          update_interval: 75ms
-          lambda: |-
-            static int pos = 0;
-            static bool flash = false;
-            
-            flash = !flash;
-            
-            if (flash) {
-              it.all() = Color(255, 0, 0);  // Helemaal rood
-            } else {
-              // Rood chase effect
-              it.all() = Color(50, 0, 0);  // Dim rood
-              for (int i = 0; i < 3; i++) {
-                int idx = (pos + i) % it.size();
-                it[idx] = Color(255, 0, 0);  // Fel rood
+            // Teken progressie balk als we niet aan het knipperen zijn
+            if (!should_blink) {
+              for (int i = 0; i < num_leds && i < it.size(); i++) {
+                // Bereken kleur gebaseerd op positie
+                // 0-6 LEDs: Groen
+                // 7-13 LEDs: Groen -> Geel -> Oranje
+                // 14-20 LEDs: Oranje -> Rood
+                
+                int r, g, b;
+                if (i < 7) {
+                  // Groen (LEDs 0-6)
+                  r = 0;
+                  g = 255;
+                  b = 0;
+                } else if (i < 14) {
+                  // Groen naar Oranje transitie (LEDs 7-13)
+                  float ratio = (i - 7) / 7.0;
+                  r = (int)(ratio * 255);
+                  g = 255 - (int)(ratio * 100);  // Van 255 naar 155
+                  b = 0;
+                } else {
+                  // Oranje naar Rood transitie (LEDs 14-19)
+                  float ratio = (i - 14) / 6.0;
+                  r = 255;
+                  g = 155 - (int)(ratio * 155);  // Van 155 naar 0
+                  b = 0;
+                }
+                
+                it[i] = Color(r, g, b);
               }
-              pos = (pos + 1) % it.size();
             }
 
       # Test effect - rainbow
@@ -495,19 +474,10 @@ interval:
           // Update zone status text sensor
           id(parking_zone_status).publish_state(zone_name);
           
-          // Update LED strip als zone is veranderd en LED strip is enabled
-          if (id(led_strip_enabled).state && id(last_distance_zone) != current_zone) {
-            std::string led_effect;
-            switch(current_zone) {
-              case 0: led_effect = "Zone 0 - Veilig"; break;
-              case 1: led_effect = "Zone 1 - Langzaam"; break;
-              case 2: led_effect = "Zone 2 - Medium"; break;
-              case 3: led_effect = "Zone 3 - Voorzichtig"; break;
-              case 4: led_effect = "Zone 4 - STOP"; break;
-              default: led_effect = "Zone 0 - Veilig"; break;
-            }
+          // LED strip: altijd progressie balk tonen als enabled
+          if (id(led_strip_enabled).state && !id(led_strip).current_values.is_on()) {
             auto call = id(led_strip).turn_on();
-            call.set_effect(led_effect);
+            call.set_effect("Distance Progress Bar");
             call.perform();
           }
           
