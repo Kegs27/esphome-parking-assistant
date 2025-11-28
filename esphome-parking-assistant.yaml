@@ -156,22 +156,19 @@ binary_sensor:
     entity_id: binary_sensor.garage_poort_sensor_open
     id: garagepoort
 
-# SR04T in Mode 0 (standaard, geen modificatie nodig)
-# Bereik: 25cm - 4m
-# pulse_time: 20us is chosen because:
-# - The SR04T sensor requires a minimum 10us trigger pulse, but 20us provides a stronger
-#   ultrasonic burst for more reliable long-range detection (up to 4m)
-# - This value is commonly recommended for JSN-SR04T waterproof sensors to improve accuracy
-# - Too short pulse (<10us) may not trigger properly; too long (>50us) wastes time
+# JSN-SR04T in Mode 1 (100k resistor op R19 pad)
+# In Mode 1: Serial output mode via UART
+# Bereik: 25cm - 4m (verbeterde stabiliteit en nauwkeurigheid)
+uart:
+  tx_pin: GPIO32  # TX van ESP32 naar RX van sensor
+  rx_pin: GPIO33  # RX van ESP32 van TX van sensor
+  baud_rate: 9600
+
 sensor:
-  - platform: ultrasonic
-    trigger_pin: GPIO32
-    echo_pin: GPIO33
+  - platform: jsn_sr04t
     name: "Garage afstand"
     id: afstand
     update_interval: 0.25s
-    pulse_time: 20us
-    timeout: 5m  # Extended timeout to ensure 4m readings are captured
     filters:
       - filter_out: nan
       - clamp:

@@ -1,0 +1,31 @@
+# ESPHome Build Files
+/.esphome/
+*.bin
+*.elf
+
+# Secrets - NEVER commit!
+/secrets.yaml
+
+# IDE Files
+/.idea/
+/.vscode/
+*.swp
+*.swo
+*.iml
+*~
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Logs
+*.log
+
