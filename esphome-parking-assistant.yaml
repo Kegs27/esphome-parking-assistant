@@ -107,6 +107,49 @@ number:
     icon: "mdi:speedometer"
     entity_category: config
 
+  # Configurable beep intervals per zone (in milliseconds)
+  - platform: template
+    name: "Zone 1 - Beep Interval"
+    id: zone1_interval
+    min_value: 100
+    max_value: 3000
+    step: 50
+    unit_of_measurement: "ms"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 1000
+    icon: "mdi:timer-sand"
+    entity_category: config
+    
+  - platform: template
+    name: "Zone 2 - Beep Interval"
+    id: zone2_interval
+    min_value: 100
+    max_value: 3000
+    step: 50
+    unit_of_measurement: "ms"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 500
+    icon: "mdi:timer-sand"
+    entity_category: config
+    
+  - platform: template
+    name: "Zone 3 - Beep Interval"
+    id: zone3_interval
+    min_value: 100
+    max_value: 3000
+    step: 50
+    unit_of_measurement: "ms"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 250
+    icon: "mdi:timer-sand"
+    entity_category: config
+    
 # Garage door binary sensor from Home Assistant
 binary_sensor:
   - platform: homeassistant
@@ -117,8 +160,8 @@ binary_sensor:
 # In Mode 1: Serial output mode via UART
 # Bereik: 25cm - 4m (verbeterde stabiliteit en nauwkeurigheid)
 uart:
-  tx_pin: GPIO32  # Trigger pin (TX van ESP32 naar RX van sensor)
-  rx_pin: GPIO33  # Echo pin (RX van ESP32 van TX van sensor)
+  tx_pin: GPIO32  # TX van ESP32 naar RX van sensor
+  rx_pin: GPIO33  # RX van ESP32 van TX van sensor
   baud_rate: 9600
 
 sensor:
@@ -154,6 +197,28 @@ text_sensor:
     icon: "mdi:traffic-light"
     entity_category: diagnostic
 
+# Configurable RTTTL beep patterns
+text:
+  - platform: template
+    name: "Beep Pattern (Zones 1-3)"
+    id: beep_pattern
+    optimistic: true
+    restore_value: true
+    initial_value: "beep:d=4,o=6,b=100:e"
+    mode: text
+    icon: "mdi:music-note"
+    entity_category: config
+    
+  - platform: template
+    name: "Alarm Pattern (Zone 4 - STOP)"
+    id: alarm_pattern
+    optimistic: true
+    restore_value: true
+    initial_value: "alarm:d=4,o=6,b=100:2e,2e,2e,2e"
+    mode: text
+    icon: "mdi:alarm"
+    entity_category: config
+
 # Buzzer output op GPIO27 - LEDC voor RTTTL
 output:
   - platform: ledc
@@ -176,9 +241,14 @@ globals:
     type: bool
     restore_value: no
     initial_value: 'false'
+  - id: last_beep_time
+    type: unsigned long
+    restore_value: no
+    initial_value: '0'
 
 interval:
-  - interval: 250ms
+  # 100ms interval for responsive beeping while minimizing CPU usage
+  - interval: 100ms
     then:
       - lambda: |-
           // Check of systeem actief moet zijn
@@ -192,6 +262,7 @@ interval:
             }
             id(last_distance_zone) = 0;
             id(beep_active) = false;
+            id(last_beep_time) = 0;
             if (!id(parking_assistant_enabled).state) {
               id(parking_zone_status).publish_state("Uitgeschakeld");
             } else {
@@ -209,6 +280,7 @@ interval:
             }
             id(last_distance_zone) = 0;
             id(beep_active) = false;
+            id(last_beep_time) = 0;
             id(parking_zone_status).publish_state("Geen meting");
             return;
           }
@@ -222,70 +294,74 @@ interval:
           // Bepaal in welke zone de auto zich bevindt
           int current_zone = 0;
           std::string zone_name = "";
+          unsigned long current_interval = 0;
           
           if (d > zone1_threshold) {
             current_zone = 0;  // Geen geluid
             zone_name = "Veilig (" + to_string(d).substr(0, 4) + "m)";
+            current_interval = 0;
           } else if (d > zone2_threshold) {
             current_zone = 1;  // Langzaam
             zone_name = "Langzaam (" + to_string(d).substr(0, 4) + "m)";
+            current_interval = (unsigned long)id(zone1_interval).state;
           } else if (d > zone3_threshold) {
             current_zone = 2;  // Medium
             zone_name = "Let op! (" + to_string(d).substr(0, 4) + "m)";
+            current_interval = (unsigned long)id(zone2_interval).state;
           } else if (d > zone4_threshold) {
             current_zone = 3;  // Snel
             zone_name = "Voorzichtig! (" + to_string(d).substr(0, 4) + "m)";
+            current_interval = (unsigned long)id(zone3_interval).state;
           } else {
             current_zone = 4;  // Continue toon (STOP!)
             zone_name = "STOP! (" + to_string(d).substr(0, 4) + "m)";
+            // Zone 4 uses continuous beep, no interval needed
           }
           
           // Update zone status text sensor
           id(parking_zone_status).publish_state(zone_name);
           
-          // Reset beep_active when RTTTL has finished playing so the beep can restart
-          if (id(beep_active) && !id(buzzer_rtttl).is_playing()) {
-            id(beep_active) = false;
-          }
+          // Update last_distance_zone
+          id(last_distance_zone) = current_zone;
           
-          // Als zone veranderd is of geen beep actief is, start nieuwe beep
-          if (current_zone != id(last_distance_zone) || !id(beep_active)) {
-            id(last_distance_zone) = current_zone;
-            
-            // Stop huidige beep als die er is
+          // Zone 0 = geen geluid
+          if (current_zone == 0) {
             if (id(buzzer_rtttl).is_playing()) {
               id(buzzer_rtttl).stop();
             }
-            
-            // Start nieuwe beep patroon
-            switch (current_zone) {
-              case 0:
-                // > zone1: geen geluid
-                id(beep_active) = false;
-                break;
-                
-              case 1:
-                // zone1 - zone2: langzame beep (1x per seconde)
-                id(buzzer_rtttl).play("beep1:d=4,o=6,b=120:8e");
-                id(beep_active) = true;
-                break;
-                
-              case 2:
-                // zone2 - zone3: snellere beep (2x per seconde)
-                id(buzzer_rtttl).play("beep2:d=8,o=6,b=240:16e,16e");
-                id(beep_active) = true;
-                break;
-                
-              case 3:
-                // zone3 - zone4: zeer snelle beep
-                id(buzzer_rtttl).play("beep3:d=16,o=6,b=360:32e,32e,32e");
-                id(beep_active) = true;
-                break;
-                
-              case 4:
-                // < zone4: continue waarschuwingstoon (STOP!)
-                id(buzzer_rtttl).play("alarm:d=4,o=6,b=200:2e,2d#,2e,2d#");
-                id(beep_active) = true;
-                break;
+            id(beep_active) = false;
+            id(last_beep_time) = 0;
+            return;
+          }
+          
+          // Zone 4 = continuous alarm tone (STOP!)
+          if (current_zone == 4) {
+            // Play continuous alarm if not already playing
+            if (!id(buzzer_rtttl).is_playing()) {
+              // Use configurable alarm pattern for STOP zone
+              id(buzzer_rtttl).play(id(alarm_pattern).state);
+              id(beep_active) = true;
             }
+            return;
+          }
+          
+          // Zones 1-3: interval-based beeping
+          // Get current time in milliseconds
+          unsigned long now = millis();
+          
+          // Check if it's time to play a beep based on the configured interval
+          bool should_beep = false;
+          if (id(last_beep_time) == 0) {
+            // First beep after entering a zone
+            should_beep = true;
+          } else if ((now - id(last_beep_time)) >= current_interval) {
+            // Interval has passed, time for next beep
+            should_beep = true;
+          }
+          
+          if (should_beep && !id(buzzer_rtttl).is_playing()) {
+            id(last_beep_time) = now;
+            // Use configurable beep pattern for zones 1-3
+            id(buzzer_rtttl).play(id(beep_pattern).state);
+            id(beep_active) = true;
           }
