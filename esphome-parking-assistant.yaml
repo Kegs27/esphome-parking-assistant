@@ -72,8 +72,11 @@ light:
             
             // Bereken hoeveel LEDs aan moeten (0-20)
             int num_leds = 0;
+            bool in_stop_zone = false;
+            
             if (distance <= min_distance) {
               num_leds = 20;  // Alle LEDs aan bij minimum afstand
+              in_stop_zone = true;  // STOP ZONE!
             } else if (distance >= max_distance) {
               num_leds = 0;   // Geen LEDs bij veilige afstand
             } else {
@@ -83,7 +86,7 @@ light:
               num_leds = std::max(0, std::min(20, num_leds));  // Clamp tussen 0-20
             }
             
-            // Als we heel dichtbij zijn (laatste 5 LEDs), laat knipperen
+            // Blink logica
             static bool blink_state = false;
             static int blink_counter = 0;
             blink_counter++;
@@ -92,6 +95,18 @@ light:
               blink_counter = 0;
             }
             
+            // STOP ZONE: Hele strip rood en knipperend
+            if (in_stop_zone) {
+              if (blink_state) {
+                it.all() = Color(255, 0, 0);  // Hele strip fel rood
+              } else {
+                it.all() = Color(0, 0, 0);    // Hele strip uit
+              }
+              return;  // Klaar, geen verdere logica nodig
+            }
+            
+            // Normale progressie balk logica (niet in STOP zone)
+            // Als we dichtbij zijn (> 15 LEDs), laat knipperen
             bool should_blink = num_leds > 15 && !blink_state;
             
             // Alle LEDs uit
@@ -314,6 +329,12 @@ sensor:
     update_interval: 0.25s
     filters:
       - filter_out: nan
+      # Filter out maximum range readings (sensor geeft vaak 4.0m terug bij geen object)
+      - lambda: |-
+          if (x >= 3.95) {
+            return NAN;  // Negeer metingen boven 3.95m (waarschijnlijk geen object)
+          }
+          return x;
       - clamp:
           min_value: 0.25  # Minimum bereik sensor: 25cm
           max_value: 4.0   # Maximum bereik sensor: 4m
@@ -325,7 +346,11 @@ sensor:
           window_size: 3
           send_every: 1
       - delta: 0.02  # Alleen publiceren als verschil > 2cm
-  
+      # Timeout: als geen update in 2 seconden, reset naar 0
+      - timeout:
+          timeout: 2s
+          value: 0.0
+
   # Text sensor om huidige zone te tonen
   - platform: template
     name: "Parking Zone"
@@ -388,6 +413,14 @@ globals:
     type: unsigned long
     restore_value: no
     initial_value: '0'
+  - id: last_distance_value
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+  - id: distance_stuck_counter
+    type: int
+    restore_value: no
+    initial_value: '0'
 
 interval:
   # 100ms interval for responsive beeping while minimizing CPU usage
@@ -420,6 +453,21 @@ interval:
           }
           
           float d = id(afstand).state;
+          
+          // Detecteer of sensor vastloopt op dezelfde waarde (stuck reading)
+          // Als afstand exact hetzelfde blijft voor > 50 cycli (5 seconden), reset
+          if (abs(d - id(last_distance_value)) < 0.001 && d > 0) {
+            id(distance_stuck_counter)++;
+            if (id(distance_stuck_counter) > 50) {
+              // Sensor zit vast op dezelfde waarde, behandel als ongeldige meting
+              ESP_LOGW("parking", "Sensor stuck at %.2fm for 5s, resetting...", d);
+              d = 0.0;
+              id(distance_stuck_counter) = 0;
+            }
+          } else {
+            id(distance_stuck_counter) = 0;
+            id(last_distance_value) = d;
+          }
           
           // Geen geldige meting → buzzer uit
           if (d <= 0 || isnan(d)) {
