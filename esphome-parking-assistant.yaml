@@ -1,6 +1,8 @@
 substitutions:
   # Maximum aantal LEDs in de strip (hardware configuratie)
   max_led_count: "60"
+  # Log level: DEBUG voor ontwikkeling, INFO of WARN voor productie
+  log_level: "INFO"
 
 esphome:
   name: esphome-web-2410f0
@@ -15,7 +17,7 @@ esp32:
 
 # Enable logging
 logger:
-  level: DEBUG
+  level: ${log_level}
 
 # Enable Home Assistant API
 api:
@@ -70,6 +72,13 @@ light:
             float distance = id(afstand).state;
             float max_distance = id(zone1_min).state;  // Maximum afstand (1.2m standaard)
             float min_distance = id(zone4_min).state;  // Minimum afstand (0.25m standaard)
+            
+            // Guard: voorkom divide-by-zero als zone configuratie ongeldig is
+            if (max_distance <= min_distance) {
+              // Ongeldige configuratie: toon veilige fallback (alles uit)
+              it.all() = Color(0, 0, 0);
+              return;
+            }
             
             // Bereken hoeveel LEDs aan moeten (0-total_leds)
             int num_leds = 0;
@@ -356,13 +365,6 @@ sensor:
           timeout: 2s
           value: 0.0
 
-  # Text sensor om huidige zone te tonen
-  - platform: template
-    name: "Parking Zone"
-    id: parking_zone_text
-    icon: "mdi:car-brake-alert"
-    entity_category: diagnostic
-
 text_sensor:
   - platform: template
     name: "Parking Zone Status"
@@ -410,10 +412,6 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
-  - id: beep_active
-    type: bool
-    restore_value: no
-    initial_value: 'false'
   - id: last_beep_time
     type: unsigned long
     restore_value: no
@@ -426,12 +424,24 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
+  - id: last_zone_status
+    type: std::string
+    restore_value: no
+    initial_value: '""'
 
 interval:
   # 100ms interval for responsive beeping while minimizing CPU usage
   - interval: 100ms
     then:
       - lambda: |-
+          // Helper: publish status alleen als deze veranderd is
+          auto publish_status = [](const std::string& status) {
+            if (id(last_zone_status) != status) {
+              id(last_zone_status) = status;
+              id(parking_zone_status).publish_state(status);
+            }
+          };
+          
           // Check of systeem actief moet zijn
           // Test mode override: als test_mode AAN is, negeer garagepoort status
           bool garage_open = id(test_mode).state || id(garagepoort).state;
@@ -447,12 +457,11 @@ interval:
               call.perform();
             }
             id(last_distance_zone) = 0;
-            id(beep_active) = false;
             id(last_beep_time) = 0;
             if (!id(parking_assistant_enabled).state) {
-              id(parking_zone_status).publish_state("Uitgeschakeld");
+              publish_status("Uitgeschakeld");
             } else {
-              id(parking_zone_status).publish_state("Wacht op garagepoort...");
+              publish_status("Wacht op garagepoort...");
             }
             return;
           }
@@ -475,7 +484,7 @@ interval:
                 auto call = id(led_strip).turn_off();
                 call.perform();
               }
-              id(parking_zone_status).publish_state("Geparkeerd (" + to_string(d).substr(0, 4) + "m)");
+              publish_status("Geparkeerd (" + to_string(d).substr(0, 4) + "m)");
               return;
             }
           } else {
@@ -494,9 +503,8 @@ interval:
               call.perform();
             }
             id(last_distance_zone) = 0;
-            id(beep_active) = false;
             id(last_beep_time) = 0;
-            id(parking_zone_status).publish_state("Geen meting");
+            publish_status("Geen meting");
             return;
           }
           
@@ -533,8 +541,8 @@ interval:
             // Zone 4 uses continuous beep, no interval needed
           }
           
-          // Update zone status text sensor
-          id(parking_zone_status).publish_state(zone_name);
+          // Update zone status text sensor (alleen als veranderd)
+          publish_status(zone_name);
           
           // LED strip: altijd progressie balk tonen als enabled
           if (id(led_strip_enabled).state && !id(led_strip).current_values.is_on()) {
@@ -543,7 +551,14 @@ interval:
             call.perform();
           }
           
-          // Update last_distance_zone
+          // Detecteer zone change voor timer reset
+          bool zone_changed = (current_zone != id(last_distance_zone));
+          if (zone_changed) {
+            id(last_beep_time) = 0;  // Reset beep timer bij zone change
+            if (id(buzzer_rtttl).is_playing()) {
+              id(buzzer_rtttl).stop();  // Stop huidige toon bij zone change
+            }
+          }
           id(last_distance_zone) = current_zone;
           
           // Zone 0 = geen geluid
@@ -551,7 +566,6 @@ interval:
             if (id(buzzer_rtttl).is_playing()) {
               id(buzzer_rtttl).stop();
             }
-            id(beep_active) = false;
             id(last_beep_time) = 0;
             return;
           }
@@ -562,7 +576,6 @@ interval:
             if (!id(buzzer_rtttl).is_playing()) {
               // Use configurable alarm pattern for STOP zone
               id(buzzer_rtttl).play(id(alarm_pattern).state);
-              id(beep_active) = true;
             }
             return;
           }
@@ -585,5 +598,4 @@ interval:
             id(last_beep_time) = now;
             // Use configurable beep pattern for zones 1-3
             id(buzzer_rtttl).play(id(beep_pattern).state);
-            id(beep_active) = true;
           }
