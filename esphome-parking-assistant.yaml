@@ -1,3 +1,7 @@
+substitutions:
+  # Maximum aantal LEDs in de strip (hardware configuratie)
+  max_led_count: "20"
+
 esphome:
   name: esphome-web-2410f0
   friendly_name: parking_assistant_garage
@@ -48,12 +52,12 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
-# WS2812B LED strip (20 LEDs op GPIO26 met 330Ω resistor)
+# WS2812B LED strip (configureerbaar aantal LEDs op GPIO26 met 330Ω resistor)
 light:
   - platform: esp32_rmt_led_strip
     rgb_order: GRB
     pin: GPIO26
-    num_leds: 20
+    num_leds: ${max_led_count}
     chipset: ws2812
     name: "Parking LED Strip"
     id: led_strip
@@ -65,25 +69,31 @@ light:
           name: "Distance Progress Bar"
           update_interval: 50ms
           lambda: |-
+            // Haal configureerbaar aantal LEDs op
+            int total_leds = (int)id(led_count).state;
+            // Fallback voor NaN of ongeldige waarde tijdens startup
+            if (isnan(id(led_count).state) || total_leds <= 0) total_leds = it.size();
+            if (total_leds > it.size()) total_leds = it.size();  // Clamp naar hardware limit
+            
             // Haal huidige afstand op
             float distance = id(afstand).state;
             float max_distance = id(zone1_min).state;  // Maximum afstand (1.2m standaard)
             float min_distance = id(zone4_min).state;  // Minimum afstand (0.25m standaard)
             
-            // Bereken hoeveel LEDs aan moeten (0-20)
+            // Bereken hoeveel LEDs aan moeten (0-total_leds)
             int num_leds = 0;
             bool in_stop_zone = false;
             
             if (distance <= min_distance) {
-              num_leds = 20;  // Alle LEDs aan bij minimum afstand
+              num_leds = total_leds;  // Alle LEDs aan bij minimum afstand
               in_stop_zone = true;  // STOP ZONE!
             } else if (distance >= max_distance) {
               num_leds = 0;   // Geen LEDs bij veilige afstand
             } else {
               // Lineair schalen tussen min en max
               float progress = 1.0 - ((distance - min_distance) / (max_distance - min_distance));
-              num_leds = (int)(progress * 20.0);
-              num_leds = std::max(0, std::min(20, num_leds));  // Clamp tussen 0-20
+              num_leds = (int)(progress * (float)total_leds);
+              num_leds = std::max(0, std::min(total_leds, num_leds));  // Clamp tussen 0-total_leds
             }
             
             // Blink logica
@@ -95,46 +105,55 @@ light:
               blink_counter = 0;
             }
             
-            // STOP ZONE: Hele strip rood en knipperend
+            // STOP ZONE: Hele strip rood en knipperend (alleen actieve LEDs)
             if (in_stop_zone) {
+              // Eerst alle LEDs uit
+              it.all() = Color(0, 0, 0);
               if (blink_state) {
-                it.all() = Color(255, 0, 0);  // Hele strip fel rood
-              } else {
-                it.all() = Color(0, 0, 0);    // Hele strip uit
+                for (int i = 0; i < total_leds; i++) {
+                  it[i] = Color(255, 0, 0);  // Actieve LEDs fel rood
+                }
               }
               return;  // Klaar, geen verdere logica nodig
             }
             
             // Normale progressie balk logica (niet in STOP zone)
-            // Als we dichtbij zijn (> 15 LEDs), laat knipperen
-            bool should_blink = num_leds > 15 && !blink_state;
+            // Als we dichtbij zijn (> 75% van LEDs), laat knipperen
+            int blink_threshold = (int)(total_leds * 0.75);
+            bool should_blink = num_leds > blink_threshold && !blink_state;
             
             // Alle LEDs uit
             it.all() = Color(0, 0, 0);
             
             // Teken progressie balk als we niet aan het knipperen zijn
             if (!should_blink) {
-              for (int i = 0; i < num_leds && i < it.size(); i++) {
-                // Bereken kleur gebaseerd op positie
-                // 0-6 LEDs: Groen
-                // 7-13 LEDs: Groen -> Geel -> Oranje
-                // 14-20 LEDs: Oranje -> Rood
+              // Bereken zone grenzen proportioneel aan totaal aantal LEDs
+              int zone1_end = (int)(total_leds * 0.35);       // ~35% groen (was 7/20)
+              int zone2_end = (int)(total_leds * 0.70);       // ~70% groen->oranje (was 14/20)
+              
+              for (int i = 0; i < num_leds && i < total_leds; i++) {
+                // Bereken kleur gebaseerd op positie (proportioneel)
+                // Zone 1: Groen
+                // Zone 2: Groen -> Geel -> Oranje
+                // Zone 3: Oranje -> Rood
                 
                 int r, g, b;
-                if (i < 7) {
-                  // Groen (LEDs 0-6)
+                if (i < zone1_end) {
+                  // Groen (eerste ~35%)
                   r = 0;
                   g = 255;
                   b = 0;
-                } else if (i < 14) {
-                  // Groen naar Oranje transitie (LEDs 7-13)
-                  float ratio = (i - 7) / 7.0;
+                } else if (i < zone2_end) {
+                  // Groen naar Oranje transitie (~35% - ~70%)
+                  int zone_size = zone2_end - zone1_end;
+                  float ratio = (zone_size > 0) ? (float)(i - zone1_end) / (float)zone_size : 0.0;
                   r = (int)(ratio * 255);
                   g = 255 - (int)(ratio * 100);  // Van 255 naar 155
                   b = 0;
                 } else {
-                  // Oranje naar Rood transitie (LEDs 14-19)
-                  float ratio = (i - 14) / 6.0;
+                  // Oranje naar Rood transitie (~70% - 100%)
+                  int zone_size = total_leds - zone2_end;
+                  float ratio = (zone_size > 0) ? (float)(i - zone2_end) / (float)zone_size : 0.0;
                   r = 255;
                   g = 155 - (int)(ratio * 155);  // Van 155 naar 0
                   b = 0;
@@ -148,7 +167,7 @@ light:
       - addressable_rainbow:
           name: "Test - Rainbow"
           speed: 10
-          width: 20
+          width: ${max_led_count}
 
       # Test effect - scanner (Knight Rider style)
       - addressable_scan:
@@ -160,6 +179,12 @@ light:
           name: "Test - LED Check"
           update_interval: 500ms
           lambda: |-
+            // Gebruik configureerbaar aantal LEDs
+            int total_leds = (int)id(led_count).state;
+            // Fallback voor NaN of ongeldige waarde tijdens startup
+            if (isnan(id(led_count).state) || total_leds <= 0) total_leds = it.size();
+            if (total_leds > it.size()) total_leds = it.size();
+            
             static int led_index = 0;
             static int color_index = 0;
             
@@ -171,10 +196,12 @@ light:
             };
             
             it.all() = Color(0, 0, 0);
-            it[led_index] = colors[color_index];
+            if (led_index < total_leds) {
+              it[led_index] = colors[color_index];
+            }
             
             led_index++;
-            if (led_index >= it.size()) {
+            if (led_index >= total_leds) {
               led_index = 0;
               color_index = (color_index + 1) % 4;
             }
@@ -209,6 +236,21 @@ switch:
 
 # Configureerbare afstandszones (aanpasbaar vanuit Home Assistant)
 number:
+  # Configureerbaar aantal LEDs
+  - platform: template
+    name: "LED Count"
+    id: led_count
+    min_value: 1
+    max_value: ${max_led_count}
+    step: 1
+    unit_of_measurement: "LEDs"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: ${max_led_count}
+    icon: "mdi:led-strip"
+    entity_category: config
+
   - platform: template
     name: "Zone 1 - Geen geluid (min)"
     id: zone1_min
