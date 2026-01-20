@@ -1,6 +1,6 @@
 substitutions:
   # Maximum aantal LEDs in de strip (hardware configuratie)
-  max_led_count: "20"
+  max_led_count: "60"
 
 esphome:
   name: esphome-web-2410f0
@@ -28,16 +28,7 @@ api:
         - rtttl.play:
             rtttl: !lambda 'return song_str;'
 
-    # Service om LED strip effecten te testen
-    - service: test_led_effect
-      variables:
-        effect_name: string
-      then:
-        - light.turn_on:
-            id: led_strip
-            effect: !lambda 'return effect_name;'
-
-    # Service om de progressie balk te testen met een simulatie afstand
+    # Service om de progressie balk te testen
     - service: test_progress_bar
       then:
         - light.turn_on:
@@ -161,49 +152,6 @@ light:
                 
                 it[i] = Color(r, g, b);
               }
-            }
-
-      # Test effect - rainbow
-      - addressable_rainbow:
-          name: "Test - Rainbow"
-          speed: 10
-          width: ${max_led_count}
-
-      # Test effect - scanner (Knight Rider style)
-      - addressable_scan:
-          name: "Test - Scanner"
-          move_interval: 50ms
-
-      # Test effect - alle LEDs testen
-      - addressable_lambda:
-          name: "Test - LED Check"
-          update_interval: 500ms
-          lambda: |-
-            // Gebruik configureerbaar aantal LEDs
-            int total_leds = (int)id(led_count).state;
-            // Fallback voor NaN of ongeldige waarde tijdens startup
-            if (isnan(id(led_count).state) || total_leds <= 0) total_leds = it.size();
-            if (total_leds > it.size()) total_leds = it.size();
-            
-            static int led_index = 0;
-            static int color_index = 0;
-            
-            Color colors[] = {
-              Color(255, 0, 0),    // Rood
-              Color(0, 255, 0),    // Groen
-              Color(0, 0, 255),    // Blauw
-              Color(255, 255, 255) // Wit
-            };
-            
-            it.all() = Color(0, 0, 0);
-            if (led_index < total_leds) {
-              it[led_index] = colors[color_index];
-            }
-            
-            led_index++;
-            if (led_index >= total_leds) {
-              led_index = 0;
-              color_index = (color_index + 1) % 4;
             }
 
 # Helper switches
@@ -349,6 +297,21 @@ number:
     initial_value: 250
     icon: "mdi:timer-sand"
     entity_category: config
+
+  # Configureerbare timeout voor parkeren voltooid detectie
+  - platform: template
+    name: "Parking Complete Timeout"
+    id: parking_complete_timeout
+    min_value: 1
+    max_value: 30
+    step: 1
+    unit_of_measurement: "s"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 5
+    icon: "mdi:car-parking-lights"
+    entity_category: config
     
 # Garage door binary sensor from Home Assistant
 binary_sensor:
@@ -459,7 +422,7 @@ globals:
     type: float
     restore_value: no
     initial_value: '0.0'
-  - id: distance_stuck_counter
+  - id: parking_stable_counter
     type: int
     restore_value: no
     initial_value: '0'
@@ -496,18 +459,27 @@ interval:
           
           float d = id(afstand).state;
           
-          // Detecteer of sensor vastloopt op dezelfde waarde (stuck reading)
-          // Als afstand exact hetzelfde blijft voor > 50 cycli (5 seconden), reset
+          // Detecteer of auto stilstaat (afstand verandert niet meer)
+          // Als afstand stabiel blijft voor de geconfigureerde timeout, parkeren is voltooid
+          // Bereken aantal cycli: timeout in seconden × 10 cycli per seconde (100ms interval)
+          int timeout_cycles = (int)(id(parking_complete_timeout).state * 10);
           if (abs(d - id(last_distance_value)) < 0.001 && d > 0) {
-            id(distance_stuck_counter)++;
-            if (id(distance_stuck_counter) > 50) {
-              // Sensor zit vast op dezelfde waarde, behandel als ongeldige meting
-              ESP_LOGW("parking", "Sensor stuck at %.2fm for 5s, resetting...", d);
-              d = 0.0;
-              id(distance_stuck_counter) = 0;
+            id(parking_stable_counter)++;
+            if (id(parking_stable_counter) > timeout_cycles) {
+              // Auto staat stil, parkeren voltooid - stop LED en geluid
+              ESP_LOGI("parking", "Parking complete - distance stable at %.2fm for %ds", d, (int)id(parking_complete_timeout).state);
+              if (id(buzzer_rtttl).is_playing()) {
+                id(buzzer_rtttl).stop();
+              }
+              if (id(led_strip_enabled).state && id(led_strip).current_values.is_on()) {
+                auto call = id(led_strip).turn_off();
+                call.perform();
+              }
+              id(parking_zone_status).publish_state("Geparkeerd (" + to_string(d).substr(0, 4) + "m)");
+              return;
             }
           } else {
-            id(distance_stuck_counter) = 0;
+            id(parking_stable_counter) = 0;
             id(last_distance_value) = d;
           }
           
