@@ -1,3 +1,9 @@
+substitutions:
+  # Maximum aantal LEDs in de strip (hardware configuratie)
+  max_led_count: "60"
+  # Log level: DEBUG voor ontwikkeling, INFO of WARN voor productie
+  log_level: "INFO"
+
 esphome:
   name: esphome-web-2410f0
   friendly_name: parking_assistant_garage
@@ -11,7 +17,7 @@ esp32:
 
 # Enable logging
 logger:
-  level: DEBUG
+  level: ${log_level}
 
 # Enable Home Assistant API
 api:
@@ -24,16 +30,7 @@ api:
         - rtttl.play:
             rtttl: !lambda 'return song_str;'
 
-    # Service om LED strip effecten te testen
-    - service: test_led_effect
-      variables:
-        effect_name: string
-      then:
-        - light.turn_on:
-            id: led_strip
-            effect: !lambda 'return effect_name;'
-
-    # Service om de progressie balk te testen met een simulatie afstand
+    # Service om de progressie balk te testen
     - service: test_progress_bar
       then:
         - light.turn_on:
@@ -48,12 +45,12 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
-# WS2812B LED strip (20 LEDs op GPIO26 met 330Ω resistor)
+# WS2812B LED strip (configureerbaar aantal LEDs op GPIO26 met 330Ω resistor)
 light:
   - platform: esp32_rmt_led_strip
     rgb_order: GRB
     pin: GPIO26
-    num_leds: 20
+    num_leds: ${max_led_count}
     chipset: ws2812
     name: "Parking LED Strip"
     id: led_strip
@@ -65,25 +62,38 @@ light:
           name: "Distance Progress Bar"
           update_interval: 50ms
           lambda: |-
+            // Haal configureerbaar aantal LEDs op
+            int total_leds = (int)id(led_count).state;
+            // Fallback voor NaN of ongeldige waarde tijdens startup
+            if (isnan(id(led_count).state) || total_leds <= 0) total_leds = it.size();
+            if (total_leds > it.size()) total_leds = it.size();  // Clamp naar hardware limit
+            
             // Haal huidige afstand op
             float distance = id(afstand).state;
             float max_distance = id(zone1_min).state;  // Maximum afstand (1.2m standaard)
             float min_distance = id(zone4_min).state;  // Minimum afstand (0.25m standaard)
             
-            // Bereken hoeveel LEDs aan moeten (0-20)
+            // Guard: voorkom divide-by-zero als zone configuratie ongeldig is
+            if (max_distance <= min_distance) {
+              // Ongeldige configuratie: toon veilige fallback (alles uit)
+              it.all() = Color(0, 0, 0);
+              return;
+            }
+            
+            // Bereken hoeveel LEDs aan moeten (0-total_leds)
             int num_leds = 0;
             bool in_stop_zone = false;
             
             if (distance <= min_distance) {
-              num_leds = 20;  // Alle LEDs aan bij minimum afstand
+              num_leds = total_leds;  // Alle LEDs aan bij minimum afstand
               in_stop_zone = true;  // STOP ZONE!
             } else if (distance >= max_distance) {
               num_leds = 0;   // Geen LEDs bij veilige afstand
             } else {
               // Lineair schalen tussen min en max
               float progress = 1.0 - ((distance - min_distance) / (max_distance - min_distance));
-              num_leds = (int)(progress * 20.0);
-              num_leds = std::max(0, std::min(20, num_leds));  // Clamp tussen 0-20
+              num_leds = (int)(progress * (float)total_leds);
+              num_leds = std::max(0, std::min(total_leds, num_leds));  // Clamp tussen 0-total_leds
             }
             
             // Blink logica
@@ -95,46 +105,55 @@ light:
               blink_counter = 0;
             }
             
-            // STOP ZONE: Hele strip rood en knipperend
+            // STOP ZONE: Hele strip rood en knipperend (alleen actieve LEDs)
             if (in_stop_zone) {
+              // Eerst alle LEDs uit
+              it.all() = Color(0, 0, 0);
               if (blink_state) {
-                it.all() = Color(255, 0, 0);  // Hele strip fel rood
-              } else {
-                it.all() = Color(0, 0, 0);    // Hele strip uit
+                for (int i = 0; i < total_leds; i++) {
+                  it[i] = Color(255, 0, 0);  // Actieve LEDs fel rood
+                }
               }
               return;  // Klaar, geen verdere logica nodig
             }
             
             // Normale progressie balk logica (niet in STOP zone)
-            // Als we dichtbij zijn (> 15 LEDs), laat knipperen
-            bool should_blink = num_leds > 15 && !blink_state;
+            // Als we dichtbij zijn (> 75% van LEDs), laat knipperen
+            int blink_threshold = (int)(total_leds * 0.75);
+            bool should_blink = num_leds > blink_threshold && !blink_state;
             
             // Alle LEDs uit
             it.all() = Color(0, 0, 0);
             
             // Teken progressie balk als we niet aan het knipperen zijn
             if (!should_blink) {
-              for (int i = 0; i < num_leds && i < it.size(); i++) {
-                // Bereken kleur gebaseerd op positie
-                // 0-6 LEDs: Groen
-                // 7-13 LEDs: Groen -> Geel -> Oranje
-                // 14-20 LEDs: Oranje -> Rood
+              // Bereken zone grenzen proportioneel aan totaal aantal LEDs
+              int zone1_end = (int)(total_leds * 0.35);       // ~35% groen (was 7/20)
+              int zone2_end = (int)(total_leds * 0.70);       // ~70% groen->oranje (was 14/20)
+              
+              for (int i = 0; i < num_leds && i < total_leds; i++) {
+                // Bereken kleur gebaseerd op positie (proportioneel)
+                // Zone 1: Groen
+                // Zone 2: Groen -> Geel -> Oranje
+                // Zone 3: Oranje -> Rood
                 
                 int r, g, b;
-                if (i < 7) {
-                  // Groen (LEDs 0-6)
+                if (i < zone1_end) {
+                  // Groen (eerste ~35%)
                   r = 0;
                   g = 255;
                   b = 0;
-                } else if (i < 14) {
-                  // Groen naar Oranje transitie (LEDs 7-13)
-                  float ratio = (i - 7) / 7.0;
+                } else if (i < zone2_end) {
+                  // Groen naar Oranje transitie (~35% - ~70%)
+                  int zone_size = zone2_end - zone1_end;
+                  float ratio = (zone_size > 0) ? (float)(i - zone1_end) / (float)zone_size : 0.0;
                   r = (int)(ratio * 255);
                   g = 255 - (int)(ratio * 100);  // Van 255 naar 155
                   b = 0;
                 } else {
-                  // Oranje naar Rood transitie (LEDs 14-19)
-                  float ratio = (i - 14) / 6.0;
+                  // Oranje naar Rood transitie (~70% - 100%)
+                  int zone_size = total_leds - zone2_end;
+                  float ratio = (zone_size > 0) ? (float)(i - zone2_end) / (float)zone_size : 0.0;
                   r = 255;
                   g = 155 - (int)(ratio * 155);  // Van 155 naar 0
                   b = 0;
@@ -142,41 +161,6 @@ light:
                 
                 it[i] = Color(r, g, b);
               }
-            }
-
-      # Test effect - rainbow
-      - addressable_rainbow:
-          name: "Test - Rainbow"
-          speed: 10
-          width: 20
-
-      # Test effect - scanner (Knight Rider style)
-      - addressable_scan:
-          name: "Test - Scanner"
-          move_interval: 50ms
-
-      # Test effect - alle LEDs testen
-      - addressable_lambda:
-          name: "Test - LED Check"
-          update_interval: 500ms
-          lambda: |-
-            static int led_index = 0;
-            static int color_index = 0;
-            
-            Color colors[] = {
-              Color(255, 0, 0),    // Rood
-              Color(0, 255, 0),    // Groen
-              Color(0, 0, 255),    // Blauw
-              Color(255, 255, 255) // Wit
-            };
-            
-            it.all() = Color(0, 0, 0);
-            it[led_index] = colors[color_index];
-            
-            led_index++;
-            if (led_index >= it.size()) {
-              led_index = 0;
-              color_index = (color_index + 1) % 4;
             }
 
 # Helper switches
@@ -209,6 +193,21 @@ switch:
 
 # Configureerbare afstandszones (aanpasbaar vanuit Home Assistant)
 number:
+  # Configureerbaar aantal LEDs
+  - platform: template
+    name: "LED Count"
+    id: led_count
+    min_value: 1
+    max_value: ${max_led_count}
+    step: 1
+    unit_of_measurement: "LEDs"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: ${max_led_count}
+    icon: "mdi:led-strip"
+    entity_category: config
+
   - platform: template
     name: "Zone 1 - Geen geluid (min)"
     id: zone1_min
@@ -307,6 +306,21 @@ number:
     initial_value: 250
     icon: "mdi:timer-sand"
     entity_category: config
+
+  # Configureerbare timeout voor parkeren voltooid detectie
+  - platform: template
+    name: "Parking Complete Timeout"
+    id: parking_complete_timeout
+    min_value: 1
+    max_value: 30
+    step: 1
+    unit_of_measurement: "s"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 5
+    icon: "mdi:car-parking-lights"
+    entity_category: config
     
 # Garage door binary sensor from Home Assistant
 binary_sensor:
@@ -350,13 +364,6 @@ sensor:
       - timeout:
           timeout: 2s
           value: 0.0
-
-  # Text sensor om huidige zone te tonen
-  - platform: template
-    name: "Parking Zone"
-    id: parking_zone_text
-    icon: "mdi:car-brake-alert"
-    entity_category: diagnostic
 
 text_sensor:
   - platform: template
@@ -405,10 +412,6 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
-  - id: beep_active
-    type: bool
-    restore_value: no
-    initial_value: 'false'
   - id: last_beep_time
     type: unsigned long
     restore_value: no
@@ -417,16 +420,28 @@ globals:
     type: float
     restore_value: no
     initial_value: '0.0'
-  - id: distance_stuck_counter
+  - id: parking_stable_counter
     type: int
     restore_value: no
     initial_value: '0'
+  - id: last_zone_status
+    type: std::string
+    restore_value: no
+    initial_value: '""'
 
 interval:
   # 100ms interval for responsive beeping while minimizing CPU usage
   - interval: 100ms
     then:
       - lambda: |-
+          // Helper: publish status alleen als deze veranderd is
+          auto publish_status = [](const std::string& status) {
+            if (id(last_zone_status) != status) {
+              id(last_zone_status) = status;
+              id(parking_zone_status).publish_state(status);
+            }
+          };
+          
           // Check of systeem actief moet zijn
           // Test mode override: als test_mode AAN is, negeer garagepoort status
           bool garage_open = id(test_mode).state || id(garagepoort).state;
@@ -442,30 +457,38 @@ interval:
               call.perform();
             }
             id(last_distance_zone) = 0;
-            id(beep_active) = false;
             id(last_beep_time) = 0;
             if (!id(parking_assistant_enabled).state) {
-              id(parking_zone_status).publish_state("Uitgeschakeld");
+              publish_status("Uitgeschakeld");
             } else {
-              id(parking_zone_status).publish_state("Wacht op garagepoort...");
+              publish_status("Wacht op garagepoort...");
             }
             return;
           }
           
           float d = id(afstand).state;
           
-          // Detecteer of sensor vastloopt op dezelfde waarde (stuck reading)
-          // Als afstand exact hetzelfde blijft voor > 50 cycli (5 seconden), reset
+          // Detecteer of auto stilstaat (afstand verandert niet meer)
+          // Als afstand stabiel blijft voor de geconfigureerde timeout, parkeren is voltooid
+          // Bereken aantal cycli: timeout in seconden × 10 cycli per seconde (100ms interval)
+          int timeout_cycles = (int)(id(parking_complete_timeout).state * 10);
           if (abs(d - id(last_distance_value)) < 0.001 && d > 0) {
-            id(distance_stuck_counter)++;
-            if (id(distance_stuck_counter) > 50) {
-              // Sensor zit vast op dezelfde waarde, behandel als ongeldige meting
-              ESP_LOGW("parking", "Sensor stuck at %.2fm for 5s, resetting...", d);
-              d = 0.0;
-              id(distance_stuck_counter) = 0;
+            id(parking_stable_counter)++;
+            if (id(parking_stable_counter) > timeout_cycles) {
+              // Auto staat stil, parkeren voltooid - stop LED en geluid
+              ESP_LOGI("parking", "Parking complete - distance stable at %.2fm for %ds", d, (int)id(parking_complete_timeout).state);
+              if (id(buzzer_rtttl).is_playing()) {
+                id(buzzer_rtttl).stop();
+              }
+              if (id(led_strip_enabled).state && id(led_strip).current_values.is_on()) {
+                auto call = id(led_strip).turn_off();
+                call.perform();
+              }
+              publish_status("Geparkeerd (" + to_string(d).substr(0, 4) + "m)");
+              return;
             }
           } else {
-            id(distance_stuck_counter) = 0;
+            id(parking_stable_counter) = 0;
             id(last_distance_value) = d;
           }
           
@@ -480,9 +503,8 @@ interval:
               call.perform();
             }
             id(last_distance_zone) = 0;
-            id(beep_active) = false;
             id(last_beep_time) = 0;
-            id(parking_zone_status).publish_state("Geen meting");
+            publish_status("Geen meting");
             return;
           }
           
@@ -519,8 +541,8 @@ interval:
             // Zone 4 uses continuous beep, no interval needed
           }
           
-          // Update zone status text sensor
-          id(parking_zone_status).publish_state(zone_name);
+          // Update zone status text sensor (alleen als veranderd)
+          publish_status(zone_name);
           
           // LED strip: altijd progressie balk tonen als enabled
           if (id(led_strip_enabled).state && !id(led_strip).current_values.is_on()) {
@@ -529,7 +551,14 @@ interval:
             call.perform();
           }
           
-          // Update last_distance_zone
+          // Detecteer zone change voor timer reset
+          bool zone_changed = (current_zone != id(last_distance_zone));
+          if (zone_changed) {
+            id(last_beep_time) = 0;  // Reset beep timer bij zone change
+            if (id(buzzer_rtttl).is_playing()) {
+              id(buzzer_rtttl).stop();  // Stop huidige toon bij zone change
+            }
+          }
           id(last_distance_zone) = current_zone;
           
           // Zone 0 = geen geluid
@@ -537,7 +566,6 @@ interval:
             if (id(buzzer_rtttl).is_playing()) {
               id(buzzer_rtttl).stop();
             }
-            id(beep_active) = false;
             id(last_beep_time) = 0;
             return;
           }
@@ -548,7 +576,6 @@ interval:
             if (!id(buzzer_rtttl).is_playing()) {
               // Use configurable alarm pattern for STOP zone
               id(buzzer_rtttl).play(id(alarm_pattern).state);
-              id(beep_active) = true;
             }
             return;
           }
@@ -571,5 +598,4 @@ interval:
             id(last_beep_time) = now;
             // Use configurable beep pattern for zones 1-3
             id(buzzer_rtttl).play(id(beep_pattern).state);
-            id(beep_active) = true;
           }

@@ -149,12 +149,18 @@ Na toevoegen aan HA krijg je:
 **Switches:**
 - `switch.parking_assistant_enabled` - Schakel systeem aan/uit
 - `switch.test_mode` - Test zonder garagepoort sensor
+- `switch.led_strip_enabled` - Schakel LED strip aan/uit
 
 **Configuratie:**
-- `number.zone_1_min` - Zone 1 drempel
-- `number.zone_2_min` - Zone 2 drempel
-- `number.zone_3_min` - Zone 3 drempel
-- `number.zone_4_min` - Zone 4 drempel
+- `number.led_count` - Aantal actieve LEDs (1-60)
+- `number.zone_1_min` - Zone 1 drempel (geen geluid)
+- `number.zone_2_min` - Zone 2 drempel (langzaam beep)
+- `number.zone_3_min` - Zone 3 drempel (medium beep)
+- `number.zone_4_min` - Zone 4 drempel (snel beep)
+- `number.zone_1_beep_interval` - Beep interval zone 1
+- `number.zone_2_beep_interval` - Beep interval zone 2
+- `number.zone_3_beep_interval` - Beep interval zone 3
+- `number.parking_complete_timeout` - Seconden stilstand voor parkeren voltooid
 
 **Service:**
 - `esphome.parking_assistant_garage_play_rtttl` - Test buzzer met custom RTTTL
