@@ -1,57 +1,56 @@
 # 🚗 ESPHome Parking Assistant
 
-Smart parkeer assistent voor in de garage met ultrasone afstandsmeting en audio feedback.
+Smart parking assistant for garage with ultrasonic distance measurement and audio feedback.
 
 ![ESPHome](https://img.shields.io/badge/ESPHome-2025.9+-blue)
 ![ESP-IDF](https://img.shields.io/badge/ESP--IDF-5.5.1-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
-## 📋 Inhoudsopgave
+## 📋 Table of Contents
 
 - [Features](#-features)
 - [Hardware](#-hardware)
-- [Installatie](#-installatie)
-- [Configuratie](#️-configuratie)
-- [Gebruik](#-gebruik)
+- [Installation](#-installation)
+- [Configuration](#️-configuration)
+- [Usage](#-usage)
 - [Development](#-development)
 - [Troubleshooting](#-troubleshooting)
-- [Documentatie](#-documentatie)
 
 ## ✨ Features
 
-- ✅ **Configureerbare zones** - Stel afstandszones in vanuit Home Assistant
-- ✅ **Audio feedback** - RTTTL buzzer met verschillende beep patronen
-- ✅ **Smart triggers** - Alleen actief als garagepoort open is
-- ✅ **Test mode** - Test zonder garagepoort sensor
-- ✅ **OTA updates** - Draadloze firmware updates via WiFi
-- ✅ **Home Assistant integratie** - Volledige integratie met HA
+- ✅ **Configurable zones** - Set distance zones from Home Assistant
+- ✅ **Audio feedback** - RTTTL buzzer with different beep patterns
+- ✅ **Smart triggers** - Only active when garage door is open
+- ✅ **Test mode** - Test without garage door sensor
+- ✅ **OTA updates** - Wireless firmware updates via WiFi
+- ✅ **Home Assistant integration** - Full integration with HA
 
 ## 🔧 Hardware
 
-### Componenten
+### Components
 
-| Component | Model | Pin | Opmerking |
-|-----------|-------|-----|-----------|
+| Component | Model | Pin | Notes |
+|-----------|-------|-----|-------|
 | **Microcontroller** | ESP32 DevKit | - | ESP32-WROOM-32 |
-| **Afstandssensor** | JSN-SR04T | GPIO32/33 | **Mode 1** (100kΩ op R19) |
-| **Buzzer** | Passieve buzzer | GPIO27 | RTTTL compatible |
-| **Voeding** | 5V | VIN/GND | Via USB of externe adapter |
+| **Distance Sensor** | JSN-SR04T | GPIO32/33 | **Mode 1** (100kΩ on R19) |
+| **Buzzer** | Passive buzzer | GPIO27 | RTTTL compatible |
+| **Power** | 5V | VIN/GND | Via USB or external adapter |
 
 ### JSN-SR04T Sensor Setup (Mode 1)
 
-**⚠️ BELANGRIJK:** De JSN-SR04T moet in **Mode 1** staan voor UART communicatie.
+**⚠️ IMPORTANT:** The JSN-SR04T must be in **Mode 1** for UART communication.
 
-**Hardware modificatie:**
-1. Soldeer een **100kΩ resistor** tussen de **R19 pad** op de printplaat
-2. Dit schakelt de sensor om naar **serial output mode**
+**Hardware modification:**
+1. Solder a **100kΩ resistor** between the **R19 pad** on the PCB
+2. This switches the sensor to **serial output mode**
 
-**Voordelen Mode 1:**
-- 🎯 Betere nauwkeurigheid
-- 📡 UART communicatie (betrouwbaarder)
-- 🔧 Minder interference
-- 📊 Bereik: 25cm - 4m
+**Advantages of Mode 1:**
+- 🎯 Better accuracy
+- 📡 UART communication (more reliable)
+- 🔧 Less interference
+- 📊 Range: 25cm - 4m
 
-**Pin aansluiting:**
+**Pin connection:**
 ```
 JSN-SR04T (Mode 1)    →    ESP32
 ─────────────────────────────────
@@ -61,7 +60,7 @@ TX (Echo)             →    GPIO33 (RX)
 RX (Trigger)          →    GPIO32 (TX)
 ```
 
-### Bedrading Schema
+### Wiring Diagram
 
 ```
 ESP32                 JSN-SR04T
@@ -75,117 +74,117 @@ ESP32                 JSN-SR04T
 └─────────┘          └──────────┘
 ```
 
-## 🚀 Installatie
+## 🚀 Installation
 
-### Vereisten
+### Requirements
 
-- **Docker Desktop** - Voor ESPHome builds
-- **Home Assistant** - Voor integratie
-- **WiFi netwerk** - Voor ESP32 connectiviteit
+- **Docker Desktop** - For ESPHome builds
+- **Home Assistant** - For integration
+- **WiFi network** - For ESP32 connectivity
 
-### Stap 1: Repository Klonen
+### Step 1: Clone Repository
 
 ```bash
-git clone https://github.com/jouw-username/esphome-parking-assistant.git
+git clone https://github.com/quintencls/esphome-parking-assistant.git
 cd esphome-parking-assistant
 ```
 
-### Stap 2: Secrets Configureren
+### Step 2: Configure Secrets
 
-Kopieer en bewerk `secrets.yaml`:
+Copy and edit `secrets.yaml`:
 
 ```yaml
-wifi_ssid: "JouwWiFiNaam"
-wifi_password: "JouwWiFiWachtwoord"
+wifi_ssid: "YourWiFiName"
+wifi_password: "YourWiFiPassword"
 ```
 
-⚠️ **Voeg `secrets.yaml` NOOIT toe aan git!**
+⚠️ **NEVER add `secrets.yaml` to git!**
 
-### Stap 3: Eerste Build
+### Step 3: First Build
 
 ```cmd
 build.bat
 ```
 
-**Build tijden:**
-- 🐌 Eerste keer: ~8-10 minuten (downloadt ESP-IDF tools)
-- ⚡ Volgende keer: ~1-3 minuten (gebruikt cache)
+**Build times:**
+- 🐌 First time: ~8-10 minutes (downloads ESP-IDF tools)
+- ⚡ Next time: ~1-3 minutes (uses cache)
 
-### Stap 4: Firmware Uploaden
+### Step 4: Upload Firmware
 
-**Eerste keer (via USB):**
+**First time (via USB):**
 ```cmd
 upload.bat
 ```
 
-**Volgende keer (via WiFi):**
+**Next time (via WiFi):**
 ```cmd
 upload.bat
 ```
 
-## ⚙️ Configuratie
+## ⚙️ Configuration
 
-### Afstandszones
+### Distance Zones
 
-Configureer zones in Home Assistant of pas de YAML aan:
+Configure zones in Home Assistant or adjust the YAML:
 
-| Zone | Afstand | Geluid | Actie |
-|------|---------|--------|-------|
-| **Zone 1** | > 1.20m | 🔇 Geen geluid | Veilig - rijd door |
-| **Zone 2** | 0.70m - 1.20m | 🔔 Langzaam beep | Let op |
-| **Zone 3** | 0.45m - 0.70m | 🔔🔔 Medium beep | Vertraag! |
-| **Zone 4** | 0.25m - 0.45m | 🔔🔔🔔 Snel beep | Voorzichtig! |
-| **Zone 5** | < 0.25m | 🚨 Continue alarm | **STOP!** |
+| Zone | Distance | Sound | Action |
+|------|---------|-------|--------|
+| **Zone 1** | > 1.20m | 🔇 No sound | Safe - drive on |
+| **Zone 2** | 0.70m - 1.20m | 🔔 Slow beep | Watch out |
+| **Zone 3** | 0.45m - 0.70m | 🔔🔔 Medium beep | Slow down! |
+| **Zone 4** | 0.25m - 0.45m | 🔔🔔🔔 Fast beep | Careful! |
+| **Zone 5** | < 0.25m | 🚨 Continuous alarm | **STOP!** |
 
 ### Home Assistant Entities
 
-Na toevoegen aan HA krijg je:
+After adding to HA you get:
 
 **Sensors:**
-- `sensor.garage_afstand` - Huidige afstand in meters
-- `sensor.parking_zone` - Huidige zone nummer
-- `text_sensor.parking_zone_status` - Zone status tekst
+- `sensor.garage_distance` - Current distance in meters
+- `sensor.parking_zone` - Current zone number
+- `text_sensor.parking_zone_status` - Zone status text
 
 **Switches:**
-- `switch.parking_assistant_enabled` - Schakel systeem aan/uit
-- `switch.test_mode` - Test zonder garagepoort sensor
-- `switch.led_strip_enabled` - Schakel LED strip aan/uit
+- `switch.parking_assistant_enabled` - Toggle system on/off
+- `switch.test_mode` - Test without garage door sensor
+- `switch.led_strip_enabled` - Toggle LED strip on/off
 
-**Configuratie:**
-- `number.led_count` - Aantal actieve LEDs (1-60)
-- `number.zone_1_min` - Zone 1 drempel (geen geluid)
-- `number.zone_2_min` - Zone 2 drempel (langzaam beep)
-- `number.zone_3_min` - Zone 3 drempel (medium beep)
-- `number.zone_4_min` - Zone 4 drempel (snel beep)
+**Configuration:**
+- `number.led_count` - Number of active LEDs (1-60)
+- `number.zone_1_min` - Zone 1 threshold (no sound)
+- `number.zone_2_min` - Zone 2 threshold (slow beep)
+- `number.zone_3_min` - Zone 3 threshold (medium beep)
+- `number.zone_4_min` - Zone 4 threshold (fast beep)
 - `number.zone_1_beep_interval` - Beep interval zone 1
 - `number.zone_2_beep_interval` - Beep interval zone 2
 - `number.zone_3_beep_interval` - Beep interval zone 3
-- `number.parking_complete_timeout` - Seconden stilstand voor parkeren voltooid
+- `number.parking_complete_timeout` - Seconds stationary for parking complete
 
 **Service:**
-- `esphome.parking_assistant_garage_play_rtttl` - Test buzzer met custom RTTTL
+- `esphome.parking_assistant_garage_play_rtttl` - Test buzzer with custom RTTTL
 
-## 🎮 Gebruik
+## 🎮 Usage
 
-### Dagelijks Gebruik
+### Daily Use
 
-1. Open garagepoort
-2. Systeem activeert automatisch
-3. Volg audio feedback tijdens parkeren
-4. Systeem stopt na sluiten garagepoort
+1. Open garage door
+2. System activates automatically
+3. Follow audio feedback while parking
+4. System stops after closing garage door
 
 ### Test Mode
 
-Voor testen zonder garagepoort:
+For testing without garage door:
 
-1. Schakel "Test Mode" in via HA
-2. Systeem is nu altijd actief
-3. Test verschillende afstanden
-4. Schakel Test Mode uit na test
+1. Enable "Test Mode" via HA
+2. System is now always active
+3. Test different distances
+4. Disable Test Mode after testing
 
-### Custom RTTTL Tonen
+### Custom RTTTL Tones
 
-Test de buzzer met custom tonen via HA Developer Tools:
+Test the buzzer with custom tones via HA Developer Tools:
 
 ```yaml
 service: esphome.parking_assistant_garage_play_rtttl
@@ -195,125 +194,120 @@ data:
 
 ## 💻 Development
 
-### Project Structuur
+### Project Structure
 
 ```
 esphome-parking-assistant/
-├── 📄 esphome-parking-assistant.yaml   # Hoofdconfiguratie
-├── 📄 secrets.yaml                     # WiFi credentials (niet in git!)
-├── 📄 README.md                        # Deze file
+├── 📄 esphome-parking-assistant.yaml   # Main configuration
+├── 📄 secrets.yaml                     # WiFi credentials (not in git!)
+├── 📄 README.md                        # This file
 ├── 📁 scripts/                         # Build & deployment scripts
-│   ├── build.bat                       # Compileer firmware
+│   ├── build.bat                       # Compile firmware
 │   ├── upload.bat                      # Upload via WiFi
-│   ├── logs.bat                        # Bekijk logs
-│   ├── clean.bat                       # Wis build cache
-│   ├── validate.bat                    # Valideer YAML
-│   ├── build-verbose.bat              # Build met verbose output
+│   ├── logs.bat                        # View logs
+│   ├── clean.bat                       # Clear build cache
+│   ├── validate.bat                    # Validate YAML
+│   ├── build-verbose.bat              # Build with verbose output
 │   └── monitor.bat                     # Monitor build status
-├── 📁 docs/                            # Documentatie
-│   ├── STATUS.md                       # Build status info
-│   └── LOKAAL-vs-HA.md                # Lokaal vs HA builds
-└── 📁 .esphome/                        # Build cache (niet in git)
+└── 📁 .esphome/                        # Build cache (not in git)
 ```
 
-### Beschikbare Scripts
+### Available Scripts
 
-| Script | Functie | Gebruik |
-|--------|---------|---------|
-| `build.bat` | Compileer firmware | Dubbel-klik of `.\build.bat` |
-| `upload.bat` | Upload naar ESP32 | Dubbel-klik of `.\upload.bat` |
-| `logs.bat` | Bekijk realtime logs | Dubbel-klik of `.\logs.bat` |
-| `scripts\validate.bat` | Valideer YAML | `.\scripts\validate.bat` |
-| `scripts\clean.bat` | Wis build cache | `.\scripts\clean.bat` |
+| Script | Function | Usage |
+|--------|----------|-------|
+| `build.bat` | Compile firmware | Double-click or `.\build.bat` |
+| `upload.bat` | Upload to ESP32 | Double-click or `.\upload.bat` |
+| `logs.bat` | View realtime logs | Double-click or `.\logs.bat` |
+| `scripts\validate.bat` | Validate YAML | `.\scripts\validate.bat` |
+| `scripts\clean.bat` | Clear build cache | `.\scripts\clean.bat` |
 
-### Lokaal Ontwikkelen
+### Local Development
 
-**Wijzigingen maken:**
-1. Bewerk `esphome-parking-assistant.yaml` lokaal
-2. Save bestand
-3. Run `build.bat` om te compileren
-4. Run `upload.bat` om te uploaden
-5. Run `logs.bat` om resultaat te zien
+**Making changes:**
+1. Edit `esphome-parking-assistant.yaml` locally
+2. Save file
+3. Run `build.bat` to compile
+4. Run `upload.bat` to upload
+5. Run `logs.bat` to view results
 
-**Geen Home Assistant nodig!** De YAML staat lokaal, HA ziet het device via de API.
+**No Home Assistant needed!** The YAML is local, HA sees the device via the API.
 
 ### Docker Cache
 
-Het project gebruikt een persistent Docker volume (`esphome-cache`) voor:
-- ✅ Snellere builds
-- ✅ Betrouwbaardere installatie
-- ✅ Minder downloads
+The project uses a persistent Docker volume (`esphome-cache`) for:
+- ✅ Faster builds
+- ✅ More reliable installation
+- ✅ Fewer downloads
 
-**Cache wissen bij problemen:**
+**Clear cache if problems occur:**
 ```cmd
 scripts\clean.bat
 ```
 
 ## 🔍 Troubleshooting
 
-### Sensor geeft geen metingen
+### Sensor gives no readings
 
 **Checklist:**
-1. ✅ Is de 100kΩ resistor correct gesoldeerd op R19?
-2. ✅ Staan TX en RX correct verbonden (TX→GPIO33, RX→GPIO32)?
-3. ✅ Staat de sensor op 5V voeding?
+1. ✅ Is the 100kΩ resistor correctly soldered on R19?
+2. ✅ Are TX and RX correctly connected (TX→GPIO33, RX→GPIO32)?
+3. ✅ Is the sensor powered by 5V?
 4. ✅ Check logs: `logs.bat`
 
-### Build duurt te lang / hangt
+### Build takes too long / hangs
 
-**Oplossing:**
-1. Wacht geduldig bij eerste build (8-10 min normaal)
-2. Check CPU gebruik: `docker stats`
-3. Bij problemen: run `scripts\clean.bat` en probeer opnieuw
+**Solution:**
+1. Wait patiently on first build (8-10 min is normal)
+2. Check CPU usage: `docker stats`
+3. If problems: run `scripts\clean.bat` and try again
 
-### WiFi verbinding mislukt
+### WiFi connection failed
 
 1. Check `secrets.yaml` credentials
-2. Zorg dat ESP32 binnen WiFi bereik is
-3. Check logs voor error messages
-4. Reset ESP32 en probeer opnieuw
+2. Ensure ESP32 is within WiFi range
+3. Check logs for error messages
+4. Reset ESP32 and try again
 
 ### Docker errors
 
-**Geen Docker container draait:**
+**No Docker container running:**
 ```cmd
 docker ps
 ```
 
-**Docker cache problemen:**
+**Docker cache problems:**
 ```cmd
 scripts\clean.bat
 ```
-Selecteer "ja" om Docker volume te wissen.
+Select "yes" to clear Docker volume.
 
-## 📚 Documentatie
+## 📚 Documentation
 
-- **[Build Status](docs/STATUS.md)** - Huidige build informatie
-- **[Lokaal vs HA](docs/LOKAAL-vs-HA.md)** - Vergelijking build methodes
-- **[ESPHome Docs](https://esphome.io/)** - Officiële ESPHome documentatie
-- **[JSN-SR04T Datasheet](https://www.electrodragon.com/product/jsn-sr04t-waterproof-ultrasonic-ranging-module/)** - Sensor specificaties
+- **[ESPHome Docs](https://esphome.io/)** - Official ESPHome documentation
+- **[JSN-SR04T Datasheet](https://www.electrodragon.com/product/jsn-sr04t-waterproof-ultrasonic-ranging-module/)** - Sensor specifications
 
 ## 🤝 Contributing
 
-Verbeteringen zijn welkom! 
+Improvements are welcome! 
 
-1. Fork het project
-2. Maak een feature branch (`git checkout -b feature/geweldig-idee`)
-3. Commit je wijzigingen (`git commit -m 'Voeg geweldig idee toe'`)
-4. Push naar de branch (`git push origin feature/geweldig-idee`)
-5. Open een Pull Request
+1. Fork the project
+2. Create a feature branch (`git checkout -b feature/awesome-idea`)
+3. Commit your changes (`git commit -m 'Add awesome idea'`)
+4. Push to the branch (`git push origin feature/awesome-idea`)
+5. Open a Pull Request
 
 ## 📝 License
 
-Dit project is gelicenseerd onder de MIT License.
+This project is licensed under the MIT License.
 
 ## 🙏 Credits
 
-- **ESPHome** - Geweldig framework voor ESP devices
-- **Home Assistant** - Beste home automation platform
-- **Community** - Voor alle hulp en inspiratie
+- **ESPHome** - Amazing framework for ESP devices
+- **Home Assistant** - Best home automation platform
+- **Community** - For all help and inspiration
 
 ---
 
-**Gemaakt met ❤️ voor een betere parkeerervaring**
+**Made with ❤️ for a better parking experience**
 
