@@ -11,7 +11,7 @@ echo.
 docker ps --filter "ancestor=ghcr.io/esphome/esphome" --format "table {{.ID}}\t{{.Status}}\t{{.RunningFor}}"
 
 echo.
-echo Latest logs (laatste 20 regels):
+echo Latest logs (last 20 lines):
 echo -------------------------------------
 docker ps --filter "ancestor=ghcr.io/esphome/esphome" --format "{{.ID}}" > temp_id.txt
 set /p CONTAINER_ID=<temp_id.txt
@@ -20,12 +20,12 @@ del temp_id.txt
 if not "%CONTAINER_ID%"=="" (
     docker logs %CONTAINER_ID% --tail 20
 ) else (
-    echo Geen actieve ESPHome build container gevonden.
+    echo No active ESPHome build container found.
 )
 
 echo.
 echo -------------------------------------
-echo Druk op een toets om opnieuw te checken...
+echo Press any key to check again...
 pause >nul
 cls
 goto :EOF

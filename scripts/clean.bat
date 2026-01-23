@@ -5,47 +5,47 @@ echo =====================================
 echo ESPHome - Clean Build
 echo =====================================
 echo.
-echo Dit script wist de lokale build cache.
-echo Gebruik dit als de build vastloopt of rare errors geeft.
+echo This script clears the local build cache.
+echo Use this if the build hangs or gives strange errors.
 echo.
-echo WAARSCHUWING: De volgende build duurt dan weer langer!
+echo WARNING: The next build will take longer!
 echo.
-set /p confirm="Weet je zeker dat je wilt cleanen? (j/n): "
-if /i not "%confirm%"=="j" (
-    echo Geannuleerd.
+set /p confirm="Are you sure you want to clean? (y/n): "
+if /i not "%confirm%"=="y" (
+    echo Cancelled.
     pause
     exit /b
 )
 
 echo.
-echo Bezig met cleanen...
+echo Cleaning...
 
-REM Clean lokale build directory
+REM Clean local build directory
 if exist ".esphome\build" (
-    echo Verwijderen .esphome\build...
+    echo Removing .esphome\build...
     rmdir /s /q ".esphome\build"
 )
 
 if exist ".esphome\platformio" (
-    echo Verwijderen .esphome\platformio...
+    echo Removing .esphome\platformio...
     rmdir /s /q ".esphome\platformio"
 )
 
-REM Optioneel: wis ook Docker cache volume
+REM Optional: also clear Docker cache volume
 echo.
-set /p cleanvol="Wil je ook het Docker cache volume wissen? (j/n): "
-if /i "%cleanvol%"=="j" (
-    echo Verwijderen Docker cache volume...
+set /p cleanvol="Do you also want to clear the Docker cache volume? (y/n): "
+if /i "%cleanvol%"=="y" (
+    echo Removing Docker cache volume...
     docker volume rm esphome-cache 2>nul
     docker volume create esphome-cache
-    echo Docker cache volume opnieuw aangemaakt.
+    echo Docker cache volume recreated.
 )
 
 echo.
 echo =====================================
-echo CLEAN VOLTOOID
+echo CLEAN COMPLETED
 echo =====================================
-echo Je kunt nu build.bat opnieuw uitvoeren.
+echo You can now run build.bat again.
 echo.
 pause
 
