@@ -1,0 +1,601 @@
+substitutions:
+  # Maximum number of LEDs in the strip (hardware configuration)
+  max_led_count: "60"
+  # Log level: DEBUG for development, INFO or WARN for production
+  log_level: "INFO"
+
+esphome:
+  name: parking-assistant-garage
+  friendly_name: parking_assistant_garage
+  min_version: 2025.9.0
+  name_add_mac_suffix: false
+
+esp32:
+  variant: esp32
+  framework:
+    type: esp-idf
+
+# Enable logging
+logger:
+  level: ${log_level}
+
+# Enable Home Assistant API
+api:
+  services:
+    # Service to test custom RTTTL tones
+    - service: play_rtttl
+      variables:
+        song_str: string
+      then:
+        - rtttl.play:
+            rtttl: !lambda 'return song_str;'
+
+    # Service to test the progress bar
+    - service: test_progress_bar
+      then:
+        - light.turn_on:
+            id: led_strip
+            effect: "Distance Progress Bar"
+
+# Allow Over-The-Air updates
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# WS2812B LED strip (configurable number of LEDs on GPIO26 with 330Ω resistor)
+light:
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB
+    pin: GPIO26
+    num_leds: ${max_led_count}
+    chipset: ws2812
+    name: "Parking LED Strip"
+    id: led_strip
+    restore_mode: ALWAYS_OFF
+    default_transition_length: 0s
+    effects:
+      # Progressive loading bar system - building from green to red
+      - addressable_lambda:
+          name: "Distance Progress Bar"
+          update_interval: 50ms
+          lambda: |-
+            // Get configurable number of LEDs
+            int total_leds = (int)id(led_count).state;
+            // Fallback for NaN or invalid value during startup
+            if (isnan(id(led_count).state) || total_leds <= 0) total_leds = it.size();
+            if (total_leds > it.size()) total_leds = it.size();  // Clamp to hardware limit
+            
+            // Get current distance
+            float distance = id(afstand).state;
+            float max_distance = id(zone1_min).state;  // Maximum distance (1.2m default)
+            float min_distance = id(zone4_min).state;  // Minimum distance (0.25m default)
+            
+            // Guard: prevent divide-by-zero if zone configuration is invalid
+            if (max_distance <= min_distance) {
+              // Invalid configuration: show safe fallback (all off)
+              it.all() = Color(0, 0, 0);
+              return;
+            }
+            
+            // Calculate how many LEDs should be on (0-total_leds)
+            int num_leds = 0;
+            bool in_stop_zone = false;
+            
+            if (distance <= min_distance) {
+              num_leds = total_leds;  // All LEDs on at minimum distance
+              in_stop_zone = true;  // STOP ZONE!
+            } else if (distance >= max_distance) {
+              num_leds = 0;   // No LEDs at safe distance
+            } else {
+              // Linear scaling between min and max
+              float progress = 1.0 - ((distance - min_distance) / (max_distance - min_distance));
+              num_leds = (int)(progress * (float)total_leds);
+              num_leds = std::max(0, std::min(total_leds, num_leds));  // Clamp between 0-total_leds
+            }
+            
+            // Blink logic
+            static bool blink_state = false;
+            static int blink_counter = 0;
+            blink_counter++;
+            if (blink_counter > 6) {  // Every ~300ms (6 * 50ms)
+              blink_state = !blink_state;
+              blink_counter = 0;
+            }
+            
+            // STOP ZONE: Whole strip red and blinking (only active LEDs)
+            if (in_stop_zone) {
+              // First turn all LEDs off
+              it.all() = Color(0, 0, 0);
+              if (blink_state) {
+                for (int i = 0; i < total_leds; i++) {
+                  it[i] = Color(255, 0, 0);  // Active LEDs bright red
+                }
+              }
+              return;  // Done, no further logic needed
+            }
+            
+            // Normal progress bar logic (not in STOP zone)
+            // If we're close (> 75% of LEDs), make it blink
+            int blink_threshold = (int)(total_leds * 0.75);
+            bool should_blink = num_leds > blink_threshold && !blink_state;
+            
+            // All LEDs off
+            it.all() = Color(0, 0, 0);
+            
+            // Draw progress bar if we're not blinking
+            if (!should_blink) {
+              // Calculate zone boundaries proportional to total number of LEDs
+              int zone1_end = (int)(total_leds * 0.35);       // ~35% green (was 7/20)
+              int zone2_end = (int)(total_leds * 0.70);       // ~70% green->orange (was 14/20)
+              
+              for (int i = 0; i < num_leds && i < total_leds; i++) {
+                // Calculate color based on position (proportional)
+                // Zone 1: Green
+                // Zone 2: Green -> Yellow -> Orange
+                // Zone 3: Orange -> Red
+                
+                int r, g, b;
+                if (i < zone1_end) {
+                  // Green (first ~35%)
+                  r = 0;
+                  g = 255;
+                  b = 0;
+                } else if (i < zone2_end) {
+                  // Green to Orange transition (~35% - ~70%)
+                  int zone_size = zone2_end - zone1_end;
+                  float ratio = (zone_size > 0) ? (float)(i - zone1_end) / (float)zone_size : 0.0;
+                  r = (int)(ratio * 255);
+                  g = 255 - (int)(ratio * 100);  // From 255 to 155
+                  b = 0;
+                } else {
+                  // Orange to Red transition (~70% - 100%)
+                  int zone_size = total_leds - zone2_end;
+                  float ratio = (zone_size > 0) ? (float)(i - zone2_end) / (float)zone_size : 0.0;
+                  r = 255;
+                  g = 155 - (int)(ratio * 155);  // From 155 to 0
+                  b = 0;
+                }
+                
+                it[i] = Color(r, g, b);
+              }
+            }
+
+# Helper switches
+switch:
+  - platform: template
+    name: "Parking Assistant Enabled"
+    id: parking_assistant_enabled
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    icon: "mdi:car-brake-alert"
+    
+  - platform: template
+    name: "Test Mode (Override garage door)"
+    id: test_mode
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    icon: "mdi:test-tube"
+    entity_category: config
+
+  - platform: template
+    name: "LED Strip Enabled"
+    id: led_strip_enabled
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    icon: "mdi:led-strip-variant"
+    on_turn_on:
+      - light.turn_on: led_strip
+    on_turn_off:
+      - light.turn_off: led_strip
+
+# Configurable distance zones (adjustable from Home Assistant)
+number:
+  # Configurable number of LEDs
+  - platform: template
+    name: "LED Count"
+    id: led_count
+    min_value: 1
+    max_value: ${max_led_count}
+    step: 1
+    unit_of_measurement: "LEDs"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: ${max_led_count}
+    icon: "mdi:led-strip"
+    entity_category: config
+
+  - platform: template
+    name: "Zone 1 - No Sound (min)"
+    id: zone1_min
+    min_value: 0.25
+    max_value: 4.0
+    step: 0.05
+    unit_of_measurement: "m"
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 1.20
+    icon: "mdi:arrow-expand-horizontal"
+    entity_category: config
+    
+  - platform: template
+    name: "Zone 2 - Slow (min)"
+    id: zone2_min
+    min_value: 0.25
+    max_value: 4.0
+    step: 0.05
+    unit_of_measurement: "m"
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0.70
+    icon: "mdi:speedometer-slow"
+    entity_category: config
+    
+  - platform: template
+    name: "Zone 3 - Medium (min)"
+    id: zone3_min
+    min_value: 0.25
+    max_value: 4.0
+    step: 0.05
+    unit_of_measurement: "m"
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0.45
+    icon: "mdi:speedometer-medium"
+    entity_category: config
+    
+  - platform: template
+    name: "Zone 4 - Fast (min)"
+    id: zone4_min
+    min_value: 0.25
+    max_value: 4.0
+    step: 0.05
+    unit_of_measurement: "m"
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 0.25
+    icon: "mdi:speedometer"
+    entity_category: config
+
+  # Configurable beep intervals per zone (in milliseconds)
+  - platform: template
+    name: "Zone 1 - Beep Interval"
+    id: zone1_interval
+    min_value: 100
+    max_value: 3000
+    step: 50
+    unit_of_measurement: "ms"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 1000
+    icon: "mdi:timer-sand"
+    entity_category: config
+    
+  - platform: template
+    name: "Zone 2 - Beep Interval"
+    id: zone2_interval
+    min_value: 100
+    max_value: 3000
+    step: 50
+    unit_of_measurement: "ms"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 500
+    icon: "mdi:timer-sand"
+    entity_category: config
+    
+  - platform: template
+    name: "Zone 3 - Beep Interval"
+    id: zone3_interval
+    min_value: 100
+    max_value: 3000
+    step: 50
+    unit_of_measurement: "ms"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 250
+    icon: "mdi:timer-sand"
+    entity_category: config
+
+  # Configurable timeout for parking complete detection
+  - platform: template
+    name: "Parking Complete Timeout"
+    id: parking_complete_timeout
+    min_value: 1
+    max_value: 30
+    step: 1
+    unit_of_measurement: "s"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 5
+    icon: "mdi:car-parking-lights"
+    entity_category: config
+    
+# Garage door binary sensor from Home Assistant
+binary_sensor:
+  - platform: homeassistant
+    entity_id: binary_sensor.garage_poort_sensor_open
+    id: garagepoort
+
+# JSN-SR04T in Mode 1 (100k resistor on R19 pad)
+# In Mode 1: Serial output mode via UART
+# Range: 25cm - 4m (improved stability and accuracy)
+uart:
+  tx_pin: GPIO32  # TX from ESP32 to RX of sensor
+  rx_pin: GPIO33  # RX from ESP32 from TX of sensor
+  baud_rate: 9600
+
+sensor:
+  - platform: jsn_sr04t
+    name: "Garage Distance"
+    id: afstand
+    update_interval: 0.25s
+    filters:
+      - filter_out: nan
+      # Filter out maximum range readings (sensor often returns 4.0m when no object)
+      - lambda: |-
+          if (x >= 3.95) {
+            return NAN;  // Ignore readings above 3.95m (probably no object)
+          }
+          return x;
+      - clamp:
+          min_value: 0.25  # Minimum sensor range: 25cm
+          max_value: 4.0   # Maximum sensor range: 4m
+          ignore_out_of_range: true
+      - median:
+          window_size: 5
+          send_every: 2
+      - sliding_window_moving_average:
+          window_size: 3
+          send_every: 1
+      - delta: 0.02  # Only publish if difference > 2cm
+      # Timeout: if no update in 2 seconds, reset to 0
+      - timeout:
+          timeout: 2s
+          value: 0.0
+
+text_sensor:
+  - platform: template
+    name: "Parking Zone Status"
+    id: parking_zone_status
+    icon: "mdi:traffic-light"
+    entity_category: diagnostic
+
+# Configurable RTTTL beep patterns
+text:
+  - platform: template
+    name: "Beep Pattern (Zones 1-3)"
+    id: beep_pattern
+    optimistic: true
+    restore_value: true
+    initial_value: "beep:d=4,o=6,b=100:e"
+    mode: text
+    icon: "mdi:music-note"
+    entity_category: config
+    
+  - platform: template
+    name: "Alarm Pattern (Zone 4 - STOP)"
+    id: alarm_pattern
+    optimistic: true
+    restore_value: true
+    initial_value: "alarm:d=4,o=6,b=100:2e,2e,2e,2e"
+    mode: text
+    icon: "mdi:alarm"
+    entity_category: config
+
+# Buzzer output on GPIO27 - LEDC for RTTTL
+output:
+  - platform: ledc
+    pin: GPIO27
+    id: buzzer_out
+
+# RTTTL component for buzzer tones
+rtttl:
+  output: buzzer_out
+  id: buzzer_rtttl
+  gain: 80%  # Adjust volume to preference (50-100%)
+
+# Parking assistant logic with configurable zones
+globals:
+  - id: last_distance_zone
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: last_beep_time
+    type: unsigned long
+    restore_value: no
+    initial_value: '0'
+  - id: last_distance_value
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+  - id: parking_stable_counter
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: last_zone_status
+    type: std::string
+    restore_value: no
+    initial_value: '""'
+
+interval:
+  # 100ms interval for responsive beeping while minimizing CPU usage
+  - interval: 100ms
+    then:
+      - lambda: |-
+          // Helper: publish status only if it has changed
+          auto publish_status = [](const std::string& status) {
+            if (id(last_zone_status) != status) {
+              id(last_zone_status) = status;
+              id(parking_zone_status).publish_state(status);
+            }
+          };
+          
+          // Check if system should be active
+          // Test mode override: if test_mode is ON, ignore garage door status
+          bool garage_open = id(test_mode).state || id(garagepoort).state;
+          
+          // Only active if parking assistant enabled AND (test mode OR garage door open)
+          if (!id(parking_assistant_enabled).state || !garage_open) {
+            if (id(buzzer_rtttl).is_playing()) {
+              id(buzzer_rtttl).stop();
+            }
+            // Turn off LED strip if system is not active
+            if (id(led_strip_enabled).state && id(led_strip).current_values.is_on()) {
+              auto call = id(led_strip).turn_off();
+              call.perform();
+            }
+            id(last_distance_zone) = 0;
+            id(last_beep_time) = 0;
+            if (!id(parking_assistant_enabled).state) {
+              publish_status("Disabled");
+            } else {
+              publish_status("Waiting for garage door...");
+            }
+            return;
+          }
+          
+          float d = id(afstand).state;
+          
+          // Detect if car is stationary (distance no longer changes)
+          // If distance remains stable for the configured timeout, parking is complete
+          // Calculate number of cycles: timeout in seconds × 10 cycles per second (100ms interval)
+          int timeout_cycles = (int)(id(parking_complete_timeout).state * 10);
+          if (abs(d - id(last_distance_value)) < 0.001 && d > 0) {
+            id(parking_stable_counter)++;
+            if (id(parking_stable_counter) > timeout_cycles) {
+              // Car is stationary, parking complete - stop LED and sound
+              ESP_LOGI("parking", "Parking complete - distance stable at %.2fm for %ds", d, (int)id(parking_complete_timeout).state);
+              if (id(buzzer_rtttl).is_playing()) {
+                id(buzzer_rtttl).stop();
+              }
+              if (id(led_strip_enabled).state && id(led_strip).current_values.is_on()) {
+                auto call = id(led_strip).turn_off();
+                call.perform();
+              }
+              publish_status("Parked (" + to_string(d).substr(0, 4) + "m)");
+              return;
+            }
+          } else {
+            id(parking_stable_counter) = 0;
+            id(last_distance_value) = d;
+          }
+          
+          // No valid reading → buzzer off
+          if (d <= 0 || isnan(d)) {
+            if (id(buzzer_rtttl).is_playing()) {
+              id(buzzer_rtttl).stop();
+            }
+            // Turn off LED strip on invalid reading
+            if (id(led_strip_enabled).state && id(led_strip).current_values.is_on()) {
+              auto call = id(led_strip).turn_off();
+              call.perform();
+            }
+            id(last_distance_zone) = 0;
+            id(last_beep_time) = 0;
+            publish_status("No reading");
+            return;
+          }
+          
+          // Get zone thresholds from Home Assistant entities
+          float zone1_threshold = id(zone1_min).state;  // > this value = no sound
+          float zone2_threshold = id(zone2_min).state;  // > this value = slow
+          float zone3_threshold = id(zone3_min).state;  // > this value = medium
+          float zone4_threshold = id(zone4_min).state;  // > this value = fast
+          
+          // Determine which zone the car is in
+          int current_zone = 0;
+          std::string zone_name = "";
+          unsigned long current_interval = 0;
+          
+          if (d > zone1_threshold) {
+            current_zone = 0;  // No sound
+            zone_name = "Safe (" + to_string(d).substr(0, 4) + "m)";
+            current_interval = 0;
+          } else if (d > zone2_threshold) {
+            current_zone = 1;  // Slow
+            zone_name = "Slow (" + to_string(d).substr(0, 4) + "m)";
+            current_interval = (unsigned long)id(zone1_interval).state;
+          } else if (d > zone3_threshold) {
+            current_zone = 2;  // Medium
+            zone_name = "Watch out! (" + to_string(d).substr(0, 4) + "m)";
+            current_interval = (unsigned long)id(zone2_interval).state;
+          } else if (d > zone4_threshold) {
+            current_zone = 3;  // Fast
+            zone_name = "Careful! (" + to_string(d).substr(0, 4) + "m)";
+            current_interval = (unsigned long)id(zone3_interval).state;
+          } else {
+            current_zone = 4;  // Continuous tone (STOP!)
+            zone_name = "STOP! (" + to_string(d).substr(0, 4) + "m)";
+            // Zone 4 uses continuous beep, no interval needed
+          }
+          
+          // Update zone status text sensor (only if changed)
+          publish_status(zone_name);
+          
+          // LED strip: always show progress bar if enabled
+          if (id(led_strip_enabled).state && !id(led_strip).current_values.is_on()) {
+            auto call = id(led_strip).turn_on();
+            call.set_effect("Distance Progress Bar");
+            call.perform();
+          }
+          
+          // Detect zone change for timer reset
+          bool zone_changed = (current_zone != id(last_distance_zone));
+          if (zone_changed) {
+            id(last_beep_time) = 0;  // Reset beep timer on zone change
+            if (id(buzzer_rtttl).is_playing()) {
+              id(buzzer_rtttl).stop();  // Stop current tone on zone change
+            }
+          }
+          id(last_distance_zone) = current_zone;
+          
+          // Zone 0 = no sound
+          if (current_zone == 0) {
+            if (id(buzzer_rtttl).is_playing()) {
+              id(buzzer_rtttl).stop();
+            }
+            id(last_beep_time) = 0;
+            return;
+          }
+          
+          // Zone 4 = continuous alarm tone (STOP!)
+          if (current_zone == 4) {
+            // Play continuous alarm if not already playing
+            if (!id(buzzer_rtttl).is_playing()) {
+              // Use configurable alarm pattern for STOP zone
+              id(buzzer_rtttl).play(id(alarm_pattern).state);
+            }
+            return;
+          }
+          
+          // Zones 1-3: interval-based beeping
+          // Get current time in milliseconds
+          unsigned long now = millis();
+          
+          // Check if it's time to play a beep based on the configured interval
+          bool should_beep = false;
+          if (id(last_beep_time) == 0) {
+            // First beep after entering a zone
+            should_beep = true;
+          } else if ((now - id(last_beep_time)) >= current_interval) {
+            // Interval has passed, time for next beep
+            should_beep = true;
+          }
+          
+          if (should_beep && !id(buzzer_rtttl).is_playing()) {
+            id(last_beep_time) = now;
+            // Use configurable beep pattern for zones 1-3
+            id(buzzer_rtttl).play(id(beep_pattern).state);
+          }

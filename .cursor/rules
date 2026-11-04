@@ -1,0 +1,235 @@
+# Cursor Agent Rules for Garage Parking Assistant Project
+
+## Required Reading
+
+Before making any changes to this project, you MUST:
+
+1. **Read `PLAN.md`** - Understand the project purpose, phases, requirements, and open questions
+2. **Read `HARDWARE.md`** - Understand the hardware setup, pin assignments, wiring, and safety notes
+3. **Check the current phase** - Work only on the active phase unless explicitly instructed otherwise
+4. **Review open questions** - Check `PLAN.md` for unresolved questions that may affect your work
+
+## Core Principles
+
+### 1. Parking Logic Stays On-Device
+
+- **All parking logic MUST run locally on the ESP32**
+- The system MUST work without Home Assistant or Wi-Fi connectivity
+- Home Assistant is for configuration, dashboards, and automation triggers only
+- Never make parking decisions dependent on network calls or cloud services
+
+### 2. Work One Phase at a Time
+
+- Phases are defined in `PLAN.md` and must be completed sequentially
+- Do not implement features from future phases unless explicitly asked
+- Each phase has success criteria that must be met before moving to the next
+- Phase dependencies must be respected (e.g., don't add laser control before sensor validation)
+
+### 3. Safety First
+
+- Sensor failures must fail safe (disable system rather than give false alerts)
+- Lost readings must be detected within 2 seconds and trigger safe behavior
+- Never bypass hardware protection (transistors, flyback diodes, current limiting)
+- All mains-voltage work requires professional electrician review
+
+### 4. Documentation is Required
+
+- **Hardware changes**: Update `HARDWARE.md` with new components, pin assignments, and wiring
+- **Logic changes**: Update `PLAN.md` if requirements or architecture change
+- **Open questions**: Add unresolved issues to the Open Questions section in `PLAN.md`
+- **Test results**: Document test outcomes in commit messages or update success criteria
+
+### 5. No Hardware/Library Changes Without Docs
+
+Before adding or changing hardware:
+1. Update `HARDWARE.md` BOM and pin assignments
+2. Update wiring diagrams if applicable
+3. Verify power budget and compatibility
+4. Mark as "planned" or "active" in status column
+
+Before adding ESPHome components or external libraries:
+1. Check compatibility with Arduino Nano ESP32 (ESP32-S3)
+2. Verify 3.3V logic compatibility
+3. Document in relevant configuration section
+4. Test on actual hardware before committing
+
+## ESPHome-Specific Guidelines
+
+### Configuration Structure
+
+- Use `substitutions` for values that may need adjustment (update rates, thresholds, pins)
+- Use `secrets.yaml` for all credentials (Wi-Fi, API keys, passwords)
+- Comment complex lambda functions with inline explanations
+- Group related entities (sensors, switches, etc.) logically
+- Use entity categories: `config`, `diagnostic`, or default (main controls)
+
+### State Machine Rules
+
+- State transitions should be logged at INFO level for debugging
+- Use hysteresis on all zone boundaries to prevent oscillation
+- Never use blocking delays (`delay()`) in main loop or intervals
+- Use `millis()` for time-based logic, not `delay()`
+- Global variables should be documented with purpose and lifecycle
+
+### Filtering and Stability
+
+- Apply filters in this order: outlier rejection → median → moving average → delta
+- Timeout filters should trigger safe fallback states
+- Clamp sensor values to known valid ranges
+- Always check for `NaN` and invalid values before using sensor data
+
+### Power Management
+
+- Assume Phase 1-2 run on USB power (limited current)
+- Phase 3+ assume external 5V 2A supply
+- Calculate and document current draw for new components
+- Use `deep_sleep` only if explicitly required (not in parking logic)
+
+## Git and Version Control
+
+### Commit Messages
+
+Use conventional commit format:
+- `feat(phase1): add VL53L0X sensor integration`
+- `fix(buzzer): correct transistor driver circuit`
+- `docs(hardware): update pin assignments for laser`
+- `test(sensor): validate range on CX-5 bumper`
+
+### Branch Strategy
+
+- Main branch: stable, tested code only
+- Feature branches: `feature/phase-N-description`
+- Bug fixes: `fix/issue-description`
+- Do not merge incomplete phases into main
+
+### Pull Requests
+
+- Reference phase and success criteria in PR description
+- Include test results (photos, logs, measurements)
+- Update documentation in the same PR as code changes
+- Mark success criteria as completed in `PLAN.md` if phase is done
+
+## Testing Requirements
+
+### Before Committing
+
+1. **Compile check**: `esphome config <file>.yaml` must pass
+2. **Log review**: Check for errors, warnings, or unexpected behavior
+3. **Hardware test**: If modifying I/O, test on actual hardware (not simulation)
+4. **Documentation**: Ensure all changes are reflected in `PLAN.md` or `HARDWARE.md`
+
+### Phase Validation
+
+Each phase has success criteria in `PLAN.md`. Validate all criteria before marking phase complete.
+
+Example Phase 1 validation:
+- [ ] ESPHome config compiles without errors
+- [ ] Sensor detects vehicle at multiple distances
+- [ ] Readings stable within ±5 cm when stationary
+- [ ] Update rate ≥4 Hz
+- [ ] Lost-reading detection works
+- [ ] Buzzer test switch functions
+
+## Common Pitfalls to Avoid
+
+1. **Do not drive high-current loads directly from GPIO** - Always use transistors or MOSFETs
+2. **Do not power 3.3V sensors from 5V** - Check datasheets carefully
+3. **Do not use blocking delays in main loop** - Use timers or intervals instead
+4. **Do not assume Wi-Fi is always available** - Parking logic must work offline
+5. **Do not skip filtering** - Raw sensor data is noisy and needs processing
+6. **Do not hardcode thresholds** - Use `substitutions` or configurable numbers
+7. **Do not merge Phase N+1 features into Phase N** - Respect phase boundaries
+8. **Do not delete original project files** - They are preserved in `upstream/` folder
+
+## Debugging Checklist
+
+When something doesn't work:
+
+### ESPHome Won't Compile
+1. Check ESPHome version meets `min_version` requirement
+2. Verify all secrets are defined in `secrets.yaml`
+3. Check for syntax errors in lambda functions (C++ syntax)
+4. Ensure platform/board matches hardware (esp32, arduino_nano_esp32)
+
+### Sensor Not Responding
+1. Check I2C wiring (SDA/SCL not swapped, pullups present)
+2. Run I2C scan: `i2c: scan: true` and check logs for address
+3. Verify 3.3V power at sensor VCC pin (use multimeter)
+4. Check for loose connections or damaged wires
+5. Try reducing I2C frequency: `frequency: 100kHz`
+
+### Buzzer Not Working
+1. Verify transistor wiring (base/gate, collector/drain, emitter/source)
+2. Check 5V supply at buzzer VCC
+3. Test GPIO output with LED instead of buzzer
+4. Verify base/gate resistor is present (10kΩ typical)
+5. Check transistor orientation (emitter to GND for NPN)
+
+### Readings Unstable
+1. Increase filter window sizes (median, moving average)
+2. Check for IR interference (sunlight, other IR sources)
+3. Verify sensor mounting is rigid (no vibration)
+4. Try shorter I2C wires or add shielding
+5. Check for electrical noise (motors, fluorescent lights nearby)
+
+### Wi-Fi Connection Issues
+1. Verify secrets.yaml has correct SSID/password
+2. Check ESP32 is within Wi-Fi range
+3. Ensure 2.4 GHz Wi-Fi (ESP32 does not support 5 GHz)
+4. Try fallback hotspot mode: connect to "garage-parking-assistant Fallback"
+5. Check router MAC filtering or firewall rules
+
+## Quick Reference
+
+### Key Files
+- `PLAN.md` - Project plan, phases, requirements, open questions
+- `HARDWARE.md` - Pin map, BOM, wiring, specs
+- `esphome/garage-parking-assistant.yaml` - Main ESPHome config
+- `esphome/secrets.yaml.example` - Template for secrets
+- `README.md` - User-facing documentation
+- `upstream/` - Original project files (reference only)
+
+### Important Commands
+```bash
+# Validate configuration
+esphome config esphome/garage-parking-assistant.yaml
+
+# Compile firmware
+esphome compile esphome/garage-parking-assistant.yaml
+
+# Upload via USB (first time)
+esphome upload esphome/garage-parking-assistant.yaml
+
+# Upload via OTA (after first flash)
+esphome upload esphome/garage-parking-assistant.yaml --device garage-parking-assistant.local
+
+# View logs
+esphome logs esphome/garage-parking-assistant.yaml
+
+# Clean build cache
+esphome clean esphome/garage-parking-assistant.yaml
+```
+
+### Hardware Quick Ref
+- **Board**: Arduino Nano ESP32 (ESP32-S3)
+- **I2C**: A4 (SDA), A5 (SCL)
+- **Buzzer**: D9 (via NPN/MOSFET)
+- **Laser**: D10 (Phase 3+)
+- **LEDs**: D11-D13 (Phase 3+)
+- **Power**: 3V3 (sensor), VUSB/VIN (5V peripherals)
+
+### Sensor Specs
+- **VL53L0X Range**: 10 cm - 2 m (long-range mode)
+- **Update Rate**: 4 Hz (250 ms interval)
+- **I2C Address**: 0x29 (fixed)
+- **Power**: 3.3V, ~10 mA
+
+## Credits
+
+This project is a fork of [quintencls/esphome-parking-assistant](https://github.com/quintencls/esphome-parking-assistant) (MIT License).
+
+Original project preserved in `upstream/` directory for reference.
+
+---
+
+**When in doubt**: Read `PLAN.md` and `HARDWARE.md` first. Respect phase boundaries. Keep parking logic on-device. Document everything.
