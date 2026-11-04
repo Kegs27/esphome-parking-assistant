@@ -43,31 +43,36 @@
 
 | Function | GPIO Pin | Physical Pin | Notes | Status |
 |----------|----------|--------------|-------|--------|
-| **Green Laser** | GPIO17 | D10 | Digital out to MOSFET gate (5V laser, D10 = GPIO17) | 🔵 Reserved |
-| **Status LED Red** | GPIO16 | D11 | Digital out (discrete LED or WS2812B data, D11 = GPIO16) | 🔵 Reserved |
-| **Status LED Yellow** | GPIO15 | D12 | Digital out (discrete LED, D12 = GPIO15) | 🔵 Reserved |
-| **Status LED Green** | GPIO14 | D13 | Digital out (discrete LED or built-in, D13 = GPIO14) | 🔵 Reserved |
-| **Spare GPIO 1** | GPIO5 | D2 | Future expansion (e.g., backup sensor, button, D2 = GPIO5) | 🔵 Reserved |
+| **Green Laser** | GPIO21 | D10 | Digital out to MOSFET gate (5V laser, D10 = GPIO21) | 🔵 Reserved |
+| **Status LEDs** | TBD | D2/D3/D8 | Avoid D11-D13 (SPI pins), prefer D2/D3/D8 or external driver | 🔵 Reserved |
+| **Spare GPIO 1** | GPIO5 | D2 | Future expansion (e.g., LED, button, D2 = GPIO5) | 🔵 Reserved |
 | **Spare GPIO 2** | GPIO6 | D3 | Future expansion (D3 = GPIO6) | 🔵 Reserved |
+| **Spare GPIO 3** | GPIO17 | D8 | Future expansion (D8 = GPIO17) | 🔵 Reserved |
 
 ### Notes on Pin Selection
 
-1. **I2C Pins (A4/A5)**: Hardware I2C0 interface on ESP32-S3. Fast and reliable. These are the standard I2C pins for Arduino compatibility.
+1. **I2C Pins (A4/A5)**: Hardware I2C0 interface on ESP32-S3 (GPIO11/GPIO12). Fast and reliable. These are the standard I2C pins for Arduino compatibility.
 
 2. **Buzzer on D9 (GPIO18)**: Simple digital on/off control for active buzzer module (generates its own tone internally). Any GPIO works, D9 is easily accessible on the Nano ESP32.
 
-3. **Laser on D10**: Digital output for MOSFET gate. Does not need PWM (laser is on/off only).
+3. **Laser on D10 (GPIO21)**: Digital output for MOSFET gate. Does not need PWM (laser is on/off only).
 
-4. **LED Pins (D11-D13)**: 
-   - **Option A (discrete LEDs)**: 3 separate digital outputs
-   - **Option B (WS2812B strip)**: Use only D11 for data line, D12/D13 unused
-   - D13 has a built-in LED on many Arduino boards, useful for quick testing
+4. **⚠️ Avoid D11-D13 for General I/O**: 
+   - **D11 (GPIO38)**: SPI MOSI - used by SPI peripherals
+   - **D12 (GPIO47)**: SPI MISO - used by SPI peripherals  
+   - **D13 (GPIO48)**: SPI SCK + LED_BUILTIN - SPI clock, also connected to onboard RGB LED
+   - **Recommendation**: Use D2 (GPIO5), D3 (GPIO6), or D8 (GPIO17) for LEDs instead
+   - **Why**: Avoids conflicts if future phases need SPI (e.g., SD card, display, additional sensors)
+   - **LED control options**:
+     - **Option A**: Discrete LEDs on D2, D3, D8
+     - **Option B**: WS2812B addressable strip on D10 data line (only needs 1 pin)
+     - **Built-in LED**: D13/GPIO48 is wired to onboard RGB LED but shared with SPI
 
-5. **5V vs 3.3V**:
-   - VL53L0X: **3.3V only** (connect to 3V3 pin)
-   - Buzzer module: **5V** (connect to VUSB or external 5V supply)
-   - Laser: **5V** (connect via MOSFET to VUSB or external supply)
-   - MOSFETs: Gate driven by **3.3V GPIO** (use logic-level MOSFETs)
+5. **5V vs 3.3V Logic Levels**:
+   - VL53L0X: **3.3V power and logic** (connect to 3V3 pin)
+   - Buzzer module: **5V power**, 3.3V logic control via transistor
+   - Laser (Phase 3): **5V power**, 3.3V logic via MOSFET gate
+   - All GPIOs: **3.3V logic level** (use logic-level MOSFETs/transistors for 5V loads)
 
 ---
 
@@ -190,6 +195,43 @@ Notes:
 
 Future: External 5V 2A power supply replaces VUSB for permanent installation.
 ```
+
+---
+
+## Arduino Nano ESP32 Pin Reference
+
+Complete GPIO mapping for commonly used pins (verified against ABX00083 official pinout):
+
+| Arduino Label | ESP32-S3 GPIO | Type | Notes |
+|---------------|---------------|------|-------|
+| A0 | GPIO1 | Analog/Digital | ADC input |
+| A1 | GPIO2 | Analog/Digital | ADC input |
+| A2 | GPIO3 | Analog/Digital | ADC input |
+| A3 | GPIO4 | Analog/Digital | ADC input |
+| **A4** | **GPIO11** | **Digital (I2C SDA)** | **Hardware I2C, used for VL53L0X** |
+| **A5** | **GPIO12** | **Digital (I2C SCL)** | **Hardware I2C, used for VL53L0X** |
+| A6 | GPIO13 | Analog/Digital | ADC input |
+| A7 | GPIO14 | Analog/Digital | ADC input |
+| D2 | GPIO5 | Digital | Safe for general I/O |
+| D3 | GPIO6 | Digital | Safe for general I/O |
+| D4 | GPIO7 | Digital | Safe for general I/O |
+| D5 | GPIO8 | Digital | Safe for general I/O |
+| D6 | GPIO9 | Digital | Safe for general I/O |
+| D7 | GPIO10 | Digital | Safe for general I/O |
+| D8 | GPIO17 | Digital | Safe for general I/O |
+| **D9** | **GPIO18** | **Digital** | **Buzzer control** |
+| **D10** | **GPIO21** | **Digital** | **Reserved for laser (Phase 3)** |
+| **D11** | **GPIO38** | **Digital (SPI MOSI)** | **⚠️ Avoid - SPI peripheral** |
+| **D12** | **GPIO47** | **Digital (SPI MISO)** | **⚠️ Avoid - SPI peripheral** |
+| **D13** | **GPIO48** | **Digital (SPI SCK)** | **⚠️ Avoid - SPI + LED_BUILTIN** |
+| TX | GPIO43 | UART | USB serial TX |
+| RX | GPIO44 | UART | USB serial RX |
+
+**Recommendations for Future Phases**:
+- **LEDs**: Use D2, D3, D4, D8 (avoid D11-D13 due to SPI)
+- **Additional sensors**: D5, D6, D7 available
+- **SPI devices**: D11-D13 available if you need SPI (SD card, display, etc.)
+- **Built-in RGB LED**: GPIO46 (red), GPIO45 (green), GPIO44 (blue) - separate from D13
 
 ---
 

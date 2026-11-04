@@ -407,8 +407,9 @@ button:
 #           // Zone detection, beep control, etc.
 
 # Additional outputs (Phase 3+)
-# - Green laser (D10)
-# - Status LEDs (D11, D12, D13 or WS2812B)
+# - Green laser: D10 (GPIO21)
+# - Status LEDs: Use D2/D3/D8 (avoid D11-D13, they're SPI pins)
+# - Or WS2812B addressable strip on single data pin
 
 # Notes for Phase 1 Testing:
 #

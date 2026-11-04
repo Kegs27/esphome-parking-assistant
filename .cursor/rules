@@ -211,11 +211,13 @@ esphome clean esphome/garage-parking-assistant.yaml
 ```
 
 ### Hardware Quick Ref
-- **Board**: Arduino Nano ESP32 (ESP32-S3)
+- **Board**: Arduino Nano ESP32 (ESP32-S3, ABX00083)
 - **I2C**: A4 (SDA/GPIO11), A5 (SCL/GPIO12)
 - **Buzzer**: D9 (GPIO18, via NPN/MOSFET, active 5V module)
-- **Laser**: D10 (Phase 3+)
-- **LEDs**: D11-D13 (Phase 3+)
+- **Laser**: D10 (GPIO21, Phase 3+)
+- **LEDs**: D2/D3/D8 recommended (avoid D11-D13, they're SPI pins)
+  - D2=GPIO5, D3=GPIO6, D8=GPIO17
+  - D11=GPIO38 (SPI MOSI), D12=GPIO47 (SPI MISO), D13=GPIO48 (SPI SCK + LED_BUILTIN)
 - **Power**: 3V3 (sensor), VUSB/VIN (5V peripherals)
 
 ### Sensor Specs
