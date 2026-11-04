@@ -147,11 +147,11 @@ A wall-mounted garage parking assistant that helps drivers center their vehicle 
 2. Connect to web server (`http://garage-parking-assistant.local`)
 3. Verify distance readings with vehicle at multiple positions
 4. Record maximum reliable range in both default and long-range mode
-5. Test against dark/curved bumper sections
+5. Test against different bumper sections (reflectivity/curvature varies)
 6. Document any dead zones or unreliable ranges
 
 **Open Questions**:
-- Does long-range mode provide sufficient range (>1.2 m) on the CX-5's dark bumper?
+- Does long-range mode provide sufficient range (>1.2 m) on the CX-5's bumper (finish untested)?
 - Is the 3.3V power sufficient for the VL53L0X, or do we need external power?
 - Should the level converter be used despite both devices being 3.3V?
 
@@ -294,7 +294,7 @@ A wall-mounted garage parking assistant that helps drivers center their vehicle 
 
 - **Default mode range**: ~1.2 m reliable distance on most targets
 - **Long-range mode**: Up to ~2 m on reflective/flat targets
-  - **WARNING**: Long-range mode performance drops significantly on dark or curved surfaces (like car bumpers)
+  - **WARNING**: Long-range mode performance drops significantly on dark or curved surfaces (car bumper reflectivity varies)
   - **Required testing**: Must validate against Mazda CX-5 bumper to confirm usable range
 - **Fallback sensors** (if VL53L0X insufficient):
   - **VL53L1X**: Improved range (~4 m) and accuracy, same I2C interface
@@ -341,7 +341,7 @@ This section tracks unresolved questions that may affect design decisions in fut
 
 ### Phase 1 Questions
 
-1. **[OPEN]** Does VL53L0X long-range mode provide ≥1.2 m range on the Mazda CX-5's dark bumper?
+1. **[OPEN]** Does VL53L0X long-range mode provide ≥1.2 m range on the Mazda CX-5's bumper?
    - **Test**: Compare default vs. long-range mode readings at multiple distances
    - **Acceptance**: If long-range achieves 1.5 m+, use it; otherwise evaluate VL53L1X
 

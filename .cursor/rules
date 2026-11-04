@@ -212,8 +212,8 @@ esphome clean esphome/garage-parking-assistant.yaml
 
 ### Hardware Quick Ref
 - **Board**: Arduino Nano ESP32 (ESP32-S3)
-- **I2C**: A4 (SDA), A5 (SCL)
-- **Buzzer**: D9 (via NPN/MOSFET)
+- **I2C**: A4 (SDA/GPIO11), A5 (SCL/GPIO12)
+- **Buzzer**: D9 (GPIO18, via NPN/MOSFET, active 5V module)
 - **Laser**: D10 (Phase 3+)
 - **LEDs**: D11-D13 (Phase 3+)
 - **Power**: 3V3 (sensor), VUSB/VIN (5V peripherals)

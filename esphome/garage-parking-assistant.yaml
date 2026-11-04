@@ -274,13 +274,13 @@ sensor:
     entity_category: diagnostic
 
 # Buzzer control (Phase 1: basic on/off for testing)
+# Active buzzer module generates its own tone - just needs on/off control
 output:
-  - platform: ledc
-    pin: GPIO5  # D9 on Arduino Nano ESP32
+  - platform: gpio
+    pin: GPIO18  # D9 on Arduino Nano ESP32
     id: buzzer_output
-    frequency: 2000Hz  # 2 kHz tone
     # Note: Buzzer is driven through NPN transistor/MOSFET
-    # GPIO5 (D9) -> Base/Gate -> Collector/Drain -> Buzzer Signal
+    # GPIO18 (D9) -> Base/Gate -> Collector/Drain -> Buzzer Signal (5V active module)
 
 # Buzzer switch (for manual testing)
 switch:
@@ -433,6 +433,6 @@ button:
 #
 # Open questions to answer:
 # - What is the maximum reliable range on CX-5 bumper in long-range mode?
-# - Do readings vary significantly on dark vs. chrome bumper sections?
+# - Do readings vary significantly across different bumper sections (reflectivity/curvature)?
 # - Is there noticeable drift over time (sensor warming up)?
 # - Does ambient light (garage door open vs. closed) affect readings?

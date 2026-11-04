@@ -34,7 +34,7 @@
 |----------|----------|--------------|-------|--------|
 | **I2C SDA** | GPIO11 | A4 | VL53L0X data line (A4 = GPIO11) | ✅ Active |
 | **I2C SCL** | GPIO12 | A5 | VL53L0X clock line (A5 = GPIO12) | ✅ Active |
-| **Buzzer Control** | GPIO5 | D9 | PWM output to buzzer driver (via transistor, D9 = GPIO5) | ✅ Active |
+| **Buzzer Control** | GPIO18 | D9 | Digital output to buzzer driver (via transistor, D9 = GPIO18) | ✅ Active |
 | **3.3V Power** | 3V3 | 3V3 pin | Power for VL53L0X sensor | ✅ Active |
 | **Ground** | GND | GND pin | Common ground | ✅ Active |
 | **USB Power** | VUSB | USB connector | 5V power input (development) | ✅ Active |
@@ -43,18 +43,18 @@
 
 | Function | GPIO Pin | Physical Pin | Notes | Status |
 |----------|----------|--------------|-------|--------|
-| **Green Laser** | GPIO6 | D10 | Digital out to MOSFET gate (5V laser, D10 = GPIO6) | 🔵 Reserved |
-| **Status LED Red** | GPIO7 | D11 | Digital out (discrete LED or WS2812B data, D11 = GPIO7) | 🔵 Reserved |
-| **Status LED Yellow** | GPIO8 | D12 | Digital out (discrete LED, D12 = GPIO8) | 🔵 Reserved |
-| **Status LED Green** | GPIO9 | D13 | Digital out (discrete LED or built-in, D13 = GPIO9) | 🔵 Reserved |
-| **Spare GPIO 1** | GPIO10 | D2 | Future expansion (e.g., backup sensor, button, D2 = GPIO10) | 🔵 Reserved |
-| **Spare GPIO 2** | GPIO3 | D3 | Future expansion (D3 = GPIO3) | 🔵 Reserved |
+| **Green Laser** | GPIO17 | D10 | Digital out to MOSFET gate (5V laser, D10 = GPIO17) | 🔵 Reserved |
+| **Status LED Red** | GPIO16 | D11 | Digital out (discrete LED or WS2812B data, D11 = GPIO16) | 🔵 Reserved |
+| **Status LED Yellow** | GPIO15 | D12 | Digital out (discrete LED, D12 = GPIO15) | 🔵 Reserved |
+| **Status LED Green** | GPIO14 | D13 | Digital out (discrete LED or built-in, D13 = GPIO14) | 🔵 Reserved |
+| **Spare GPIO 1** | GPIO5 | D2 | Future expansion (e.g., backup sensor, button, D2 = GPIO5) | 🔵 Reserved |
+| **Spare GPIO 2** | GPIO6 | D3 | Future expansion (D3 = GPIO6) | 🔵 Reserved |
 
 ### Notes on Pin Selection
 
 1. **I2C Pins (A4/A5)**: Hardware I2C0 interface on ESP32-S3. Fast and reliable. These are the standard I2C pins for Arduino compatibility.
 
-2. **Buzzer on D9**: Supports PWM (LEDC peripheral) for tone generation. Any GPIO with PWM capability works, but D9 is easily accessible on the Nano ESP32.
+2. **Buzzer on D9 (GPIO18)**: Simple digital on/off control for active buzzer module (generates its own tone internally). Any GPIO works, D9 is easily accessible on the Nano ESP32.
 
 3. **Laser on D10**: Digital output for MOSFET gate. Does not need PWM (laser is on/off only).
 
@@ -211,15 +211,16 @@ Future: External 5V 2A power supply replaces VUSB for permanent installation.
 
 **Critical Notes**:
 - Long-range mode performance varies greatly with target reflectivity
-- Dark or curved bumpers (like the Mazda CX-5) may limit effective range
+- Dark or curved bumpers may limit effective range (CX-5 bumper finish untested)
 - Module should have onboard 3.3V regulator if it accepts 5V - **verify before connecting**
 
 ### DIYables 5V Active Piezo Buzzer Module
 
 - **Operating voltage**: 5V (3.3V may produce weak sound)
 - **Current draw**: ~30 mA typical
-- **Control**: Simple on/off (high = sound, low = silent)
-- **Tone**: Fixed frequency (~2-4 kHz, module-dependent)
+- **Control**: Simple digital on/off (high = sound, low = silent)
+- **Tone**: Fixed frequency (~2-4 kHz, module-dependent, generated internally)
+- **Type**: Active module with internal oscillator (no PWM needed)
 - **Volume**: ~85 dB @ 10 cm (loud enough for garage environment)
 - **Connection**: Signal, VCC (5V), GND
 - **Driver required**: Cannot be driven directly from ESP32 GPIO (current too high)
