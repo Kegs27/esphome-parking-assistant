@@ -1,0 +1,439 @@
+# Garage Parking Assistant - Phase 1: Sensor Validation
+# Hardware: Arduino Nano ESP32 + VL53L0X ToF Sensor + 5V Buzzer
+# Purpose: Validate sensor accuracy and reliability against Mazda CX-5
+
+substitutions:
+  device_name: garage-parking-assistant
+  friendly_name: "Garage Parking Assistant"
+  # Sensor update rate (seconds)
+  update_interval: "0.25"
+  # Log level: DEBUG for development, INFO for normal operation
+  log_level: "DEBUG"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  comment: "Phase 1: VL53L0X sensor validation with Arduino Nano ESP32"
+  # ESPHome 2024.11.0 or newer
+  min_version: 2024.11.0
+
+# Arduino Nano ESP32 configuration
+esp32:
+  board: arduino_nano_esp32
+  framework:
+    type: arduino
+    version: recommended
+
+# Enable logging
+logger:
+  level: ${log_level}
+  logs:
+    # Reduce I2C noise in logs during normal operation
+    i2c: INFO
+    sensor: DEBUG
+    vl53l0x: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+# Enable Over-The-Air updates
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# Wi-Fi configuration
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  
+  # Enable fallback hotspot (captive portal) if Wi-Fi connection fails
+  ap:
+    ssid: "Parking-Assist Fallback"
+    password: !secret fallback_password
+
+# Captive portal for Wi-Fi configuration
+captive_portal:
+
+# Web server for local access (useful for testing without Home Assistant)
+web_server:
+  port: 80
+  version: 3
+  local: true
+
+# I2C bus configuration
+# Arduino Nano ESP32: A4=GPIO11 (SDA), A5=GPIO12 (SCL)
+i2c:
+  sda: GPIO11  # A4 on Arduino Nano ESP32
+  scl: GPIO12  # A5 on Arduino Nano ESP32
+  scan: true
+  id: i2c_bus
+  frequency: 400kHz  # Fast mode I2C
+
+# VL53L0X Time-of-Flight Distance Sensor
+sensor:
+  # VL53L0X distance measurement
+  - platform: vl53l0x
+    name: "Distance"
+    id: distance_raw
+    address: 0x29
+    update_interval: ${update_interval}s
+    # Enable long-range mode (up to ~2m on reflective targets)
+    long_range: true
+    # Timeout for sensor readings (default 10ms may be too short for long-range)
+    timeout: 200ms
+    internal: false  # Expose raw reading to HA for diagnostics
+    unit_of_measurement: "m"
+    accuracy_decimals: 3
+    device_class: distance
+    state_class: measurement
+    filters:
+      # Remove invalid readings (NaN, out of range)
+      - filter_out: nan
+      # Timeout filter: if no valid reading for 2 seconds, publish 0 (lost reading detection)
+      - timeout:
+          timeout: 2s
+          value: 0.0
+      # Clamp to sensor's valid range
+      - clamp:
+          min_value: 0.10  # VL53L0X minimum: ~10cm (sensor blind spot)
+          max_value: 2.50  # Maximum: 2.5m (beyond this is unreliable even in long-range mode)
+          ignore_out_of_range: true
+      # Median filter to remove outliers (window of 5 samples)
+      - median:
+          window_size: 5
+          send_every: 2
+          send_first_at: 2
+      # Moving average for stability (window of 3 samples)
+      - sliding_window_moving_average:
+          window_size: 5
+          send_every: 1
+      # Delta filter: only publish if change > 1cm (reduces noise)
+      - delta: 0.01
+    on_value:
+      then:
+        # Log distance changes for debugging
+        - logger.log:
+            format: "Distance: %.3f m (%.1f cm, %.1f in)"
+            args: [ 'x', 'x * 100.0', 'x * 39.3701' ]
+            level: DEBUG
+
+  # Distance in centimeters (for easier reading)
+  - platform: template
+    name: "Distance (cm)"
+    id: distance_cm
+    unit_of_measurement: "cm"
+    accuracy_decimals: 1
+    device_class: distance
+    state_class: measurement
+    icon: "mdi:ruler"
+    lambda: |-
+      if (id(distance_raw).state > 0 && !isnan(id(distance_raw).state)) {
+        return id(distance_raw).state * 100.0;
+      } else {
+        return NAN;
+      }
+    update_interval: 1s
+
+  # Distance in inches (for easier reading)
+  - platform: template
+    name: "Distance (inches)"
+    id: distance_inches
+    unit_of_measurement: "in"
+    accuracy_decimals: 1
+    device_class: distance
+    state_class: measurement
+    icon: "mdi:ruler"
+    lambda: |-
+      if (id(distance_raw).state > 0 && !isnan(id(distance_raw).state)) {
+        return id(distance_raw).state * 39.3701;
+      } else {
+        return NAN;
+      }
+    update_interval: 1s
+
+  # Rolling minimum distance (5-second window)
+  - platform: template
+    name: "Distance Min (5s)"
+    id: distance_min
+    unit_of_measurement: "cm"
+    accuracy_decimals: 1
+    device_class: distance
+    state_class: measurement
+    icon: "mdi:arrow-collapse-down"
+    entity_category: diagnostic
+    lambda: |-
+      static float window[20];  // 5 seconds at 4 Hz (0.25s update)
+      static int index = 0;
+      static bool initialized = false;
+      
+      float current = id(distance_raw).state * 100.0;
+      if (isnan(current) || current <= 0) return NAN;
+      
+      // Initialize array
+      if (!initialized) {
+        for (int i = 0; i < 20; i++) window[i] = current;
+        initialized = true;
+      }
+      
+      // Update circular buffer
+      window[index] = current;
+      index = (index + 1) % 20;
+      
+      // Find minimum
+      float min_val = window[0];
+      for (int i = 1; i < 20; i++) {
+        if (window[i] < min_val) min_val = window[i];
+      }
+      return min_val;
+    update_interval: ${update_interval}s
+
+  # Rolling maximum distance (5-second window)
+  - platform: template
+    name: "Distance Max (5s)"
+    id: distance_max
+    unit_of_measurement: "cm"
+    accuracy_decimals: 1
+    device_class: distance
+    state_class: measurement
+    icon: "mdi:arrow-collapse-up"
+    entity_category: diagnostic
+    lambda: |-
+      static float window[20];  // 5 seconds at 4 Hz
+      static int index = 0;
+      static bool initialized = false;
+      
+      float current = id(distance_raw).state * 100.0;
+      if (isnan(current) || current <= 0) return NAN;
+      
+      if (!initialized) {
+        for (int i = 0; i < 20; i++) window[i] = current;
+        initialized = true;
+      }
+      
+      window[index] = current;
+      index = (index + 1) % 20;
+      
+      float max_val = window[0];
+      for (int i = 1; i < 20; i++) {
+        if (window[i] > max_val) max_val = window[i];
+      }
+      return max_val;
+    update_interval: ${update_interval}s
+
+  # Standard deviation (stability metric)
+  - platform: template
+    name: "Distance Std Dev (5s)"
+    id: distance_stddev
+    unit_of_measurement: "cm"
+    accuracy_decimals: 2
+    icon: "mdi:chart-bell-curve"
+    entity_category: diagnostic
+    lambda: |-
+      static float window[20];
+      static int index = 0;
+      static bool initialized = false;
+      
+      float current = id(distance_raw).state * 100.0;
+      if (isnan(current) || current <= 0) return NAN;
+      
+      if (!initialized) {
+        for (int i = 0; i < 20; i++) window[i] = current;
+        initialized = true;
+      }
+      
+      window[index] = current;
+      index = (index + 1) % 20;
+      
+      // Calculate mean
+      float sum = 0;
+      for (int i = 0; i < 20; i++) sum += window[i];
+      float mean = sum / 20.0;
+      
+      // Calculate standard deviation
+      float variance = 0;
+      for (int i = 0; i < 20; i++) {
+        float diff = window[i] - mean;
+        variance += diff * diff;
+      }
+      variance /= 20.0;
+      return sqrt(variance);
+    update_interval: ${update_interval}s
+
+  # Wi-Fi signal strength
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+    entity_category: diagnostic
+
+  # Uptime sensor
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 60s
+    entity_category: diagnostic
+
+# Buzzer control (Phase 1: basic on/off for testing)
+# Active buzzer module generates its own tone - just needs on/off control
+output:
+  - platform: gpio
+    pin: GPIO18  # D9 on Arduino Nano ESP32
+    id: buzzer_output
+    # Note: Buzzer is driven through NPN transistor/MOSFET
+    # GPIO18 (D9) -> Base/Gate -> Collector/Drain -> Buzzer Signal (5V active module)
+
+# Buzzer switch (for manual testing)
+switch:
+  - platform: output
+    name: "Buzzer Test"
+    id: buzzer_switch
+    output: buzzer_output
+    icon: "mdi:volume-high"
+    entity_category: config
+
+  # Restart switch
+  - platform: restart
+    name: "Restart"
+    icon: "mdi:restart"
+    entity_category: config
+
+# Status LED (Arduino Nano ESP32 has RGB LED on GPIO46/45/44)
+# Disabled for Phase 1 - not critical for sensor validation
+# light:
+#   - platform: rgb
+#     name: "Status LED"
+#     id: onboard_led
+#     red: GPIO46
+#     green: GPIO45
+#     blue: GPIO44
+
+# Text sensors for diagnostics
+text_sensor:
+  # ESPHome version
+  - platform: version
+    name: "ESPHome Version"
+    hide_timestamp: true
+    entity_category: diagnostic
+
+  # Wi-Fi info
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      icon: "mdi:ip-network"
+      entity_category: diagnostic
+    ssid:
+      name: "Connected SSID"
+      icon: "mdi:wifi"
+      entity_category: diagnostic
+    mac_address:
+      name: "MAC Address"
+      icon: "mdi:network"
+      entity_category: diagnostic
+
+  # Sensor status (for diagnostics)
+  - platform: template
+    name: "Sensor Status"
+    id: sensor_status
+    icon: "mdi:information-outline"
+    entity_category: diagnostic
+    lambda: |-
+      float dist = id(distance_raw).state;
+      if (isnan(dist)) {
+        return {"Error: No reading (NaN)"};
+      } else if (dist <= 0) {
+        return {"Error: Lost reading (timeout)"};
+      } else if (dist < 0.10) {
+        return {"Warning: Too close (<10cm blind spot)"};
+      } else if (dist > 2.0) {
+        return {"Warning: Beyond reliable range (>2m)"};
+      } else {
+        return {"OK: Valid reading"};
+      }
+    update_interval: 2s
+
+# Binary sensors
+binary_sensor:
+  # Connection status
+  - platform: status
+    name: "Status"
+    entity_category: diagnostic
+
+# Buttons for testing
+button:
+  # Safe mode boot button
+  - platform: safe_mode
+    name: "Safe Mode Boot"
+    entity_category: diagnostic
+
+  # Factory reset button
+  - platform: factory_reset
+    name: "Factory Reset"
+    entity_category: diagnostic
+
+# Configuration for future phases (reserved, not active in Phase 1)
+# Uncomment and configure in later phases
+
+# State machine globals (Phase 2)
+# globals:
+#   - id: current_zone
+#     type: int
+#     restore_value: no
+#     initial_value: '0'
+#   - id: last_beep_time
+#     type: unsigned long
+#     restore_value: no
+#     initial_value: '0'
+
+# Zone configuration (Phase 2)
+# number:
+#   - platform: template
+#     name: "Zone 1: Safe (min distance)"
+#     id: zone1_min
+#     min_value: 0.5
+#     max_value: 3.0
+#     step: 0.05
+#     initial_value: 1.2
+#     unit_of_measurement: "m"
+#     mode: slider
+#     entity_category: config
+
+# Interval-based state machine (Phase 2)
+# interval:
+#   - interval: 100ms
+#     then:
+#       - lambda: |-
+#           // Parking state machine logic here
+#           float d = id(distance_raw).state;
+#           // Zone detection, beep control, etc.
+
+# Additional outputs (Phase 3+)
+# - Green laser: D10 (GPIO21)
+# - Status LEDs: Use D2/D3/D8 (avoid D11-D13, they're SPI pins)
+# - Or WS2812B addressable strip on single data pin
+
+# Notes for Phase 1 Testing:
+#
+# 1. Flash via USB first: `esphome run garage-parking-assistant.yaml`
+# 2. Access web server: http://garage-parking-assistant.local
+# 3. Check logs for I2C detection: "Found VL53L0X at address 0x29"
+# 4. Test distance readings with vehicle at multiple positions:
+#    - 25 cm (minimum range)
+#    - 50 cm, 75 cm, 100 cm (close range)
+#    - 120 cm (default STOP distance target)
+#    - 150 cm, 200 cm (long-range mode limit test)
+# 5. Observe stability metrics (min/max/std-dev) for stationary vehicle
+# 6. Test lost-reading detection by blocking sensor
+# 7. Toggle buzzer switch to verify buzzer circuit works
+#
+# Success criteria:
+# - Distance readings stable within ±5 cm when vehicle stationary
+# - Update rate ≥4 Hz (check log timestamps)
+# - Standard deviation <3 cm for stationary vehicle
+# - Lost reading detected within 2 seconds
+# - Buzzer activates on command
+#
+# Open questions to answer:
+# - What is the maximum reliable range on CX-5 bumper in long-range mode?
+# - Do readings vary significantly across different bumper sections (reflectivity/curvature)?
+# - Is there noticeable drift over time (sensor warming up)?
+# - Does ambient light (garage door open vs. closed) affect readings?

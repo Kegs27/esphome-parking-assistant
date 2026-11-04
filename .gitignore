@@ -4,7 +4,8 @@
 *.elf
 
 # Secrets - NEVER commit!
-/secrets.yaml
+secrets.yaml
+**/secrets.yaml
 
 # IDE Files
 /.idea/
